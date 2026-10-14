@@ -600,3 +600,10 @@ def test_display_power_tech():
     from display_intel.extract import fix_panel_source
     s, _ = fix_panel_source(PanelSpec(brand="HP", model="X", display_power_tech=["Intel DPST 7.0"]))
     assert s.display_power_tech == ["DPST 7.0"]
+
+
+def test_platform_name_cleanup():
+    from display_intel.extract import normalize_identity
+    s = normalize_identity(PanelSpec(brand="ASUS", model="X", cpu_platform="Intel® Core™ Ultra 9 Processor 386H",
+                                     gpu="NVIDIA® GeForce RTX™ 5070 Laptop GPU"))
+    assert s.cpu_platform == "Intel Core Ultra 9 386H" and s.gpu == "NVIDIA GeForce RTX 5070 Laptop GPU"

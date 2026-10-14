@@ -161,6 +161,12 @@ def normalize_identity(spec: PanelSpec) -> PanelSpec:
     if brand and model.lower().startswith(brand.lower() + " "):
         model = model[len(brand) + 1:].strip()
     data["brand"], data["model"] = brand or None, model or None
+    # 平台名稱去掉 ®™ 等符號，讓報告好讀（例如「Intel® Core™ Ultra 9 Processor 386H」→「Intel Core Ultra 9 386H」）
+    for f in ("cpu_platform", "gpu"):
+        if data.get(f):
+            v = re.sub(r"[®™©]|\(R\)|\(TM\)", "", data[f])
+            v = re.sub(r"\s+(Processor|Laptop GPU|GPU)\b", lambda m: "" if m.group(1) == "Processor" else " " + m.group(1), v)
+            data[f] = re.sub(r"\s+", " ", v).strip()
     return PanelSpec(**data)
 
 
