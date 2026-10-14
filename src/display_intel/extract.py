@@ -28,7 +28,9 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
 4. 只收 Notebook、Laptop、AIO 內建螢幕；外接顯示器、手機、平板、電視不收（但面板廠產線消息可收）。
 5. 爆料、傳聞、"reportedly"、"leak"、"据传"、"傳出" 等未證實內容，is_rumor 設為 true。
 6. summary 類欄位用繁體中文，一到兩句。
-7. 數值欄位只填數字（不含單位）；解析度拆成 res_w、res_h。"""
+7. 數值欄位只填數字（不含單位）；解析度拆成 res_w、res_h。
+8. 文章沒提到的布林欄位（例如 touch）直接省略，不要填 false。
+9. panels 只收「有品牌且有具體機型名稱」的產品；只說「某品牌新筆電」而沒有機型名稱的，不要列。"""
 
 FIELD_GUIDE = """輸出格式：
 {"results": [ { "article_id": 1, "relevant": true/false, "is_rumor": true/false,
@@ -104,6 +106,16 @@ def _check_evidence_generic(evidence: dict, text: str) -> dict:
     return {k: v for k, v in (evidence or {}).items() if isinstance(v, str) and quote_in_text(v, text)}
 
 
+GENERIC_MODELS = {"laptop", "laptops", "notebook", "notebooks", "aio", "all-in-one", "pc", "computer",
+                  "筆電", "笔记本", "筆記型電腦", "一體機", "一体机", "新款", "新機", "新机", "ノートpc"}
+
+
+def is_identifiable(spec: PanelSpec) -> bool:
+    """品牌與具體機型名稱都必須存在（機型不能只是「Laptop」這類泛稱）。"""
+    model = (spec.model or "").strip().lower()
+    return bool(spec.brand and spec.brand.strip() and model and model not in GENERIC_MODELS and len(model) >= 2)
+
+
 def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[str]]:
     """原文依據檢查與合理性檢查。"""
     flags: list[str] = []
@@ -112,8 +124,10 @@ def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[s
     for p in ex.panels:
         cleaned, f = clean_spec(p, text)
         flags += f
-        if cleaned.brand or cleaned.model:  # 連品牌機型都沒有的紀錄無法使用
+        if is_identifiable(cleaned):  # 品牌和具體機型都要有，否則無法追蹤
             panels.append(cleaned)
+        elif cleaned.brand or cleaned.model:
+            flags.append(f"缺少品牌或機型，未收錄：{cleaned.brand or ''} {cleaned.model or ''}".strip())
     ex.panels = panels
     # 平台與產線消息：至少要有一段原文依據，否則視為不可靠
     ex.platform_techs = [t for t in ex.platform_techs if _check_evidence_generic(t.evidence, text)]

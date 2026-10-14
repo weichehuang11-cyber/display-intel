@@ -256,3 +256,15 @@ def test_github_models_retired_message():
     from display_intel.llm import LLM
     with pytest.raises(RuntimeError, match="gemini"):
         LLM("github_models", "x")
+
+
+def test_unidentifiable_panels_dropped():
+    from display_intel.extract import is_identifiable, postprocess
+    assert is_identifiable(PanelSpec(brand="HP", model="OmniBook 5"))
+    assert not is_identifiable(PanelSpec(brand=None, model="Laptop"))
+    assert not is_identifiable(PanelSpec(brand="MSI", model=None))
+    assert not is_identifiable(PanelSpec(brand="Asus", model="筆電"))
+    a = art("MSI laptop", "MSI shows a new laptop with a 240Hz OLED display.")
+    ex = Extraction(relevant=True, panels=[PanelSpec(brand="MSI", refresh_hz=240, evidence={"refresh_hz": "240Hz"})])
+    ex, flags = postprocess(a, ex)
+    assert ex.panels == [] and any("缺少品牌或機型" in f for f in flags)

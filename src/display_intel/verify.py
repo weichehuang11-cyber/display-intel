@@ -131,7 +131,7 @@ def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]]) -> d
                 db.add_event("platform", t.event_type, t.model_dump(mode="json"), conf.value, article.url, article.source, key)
                 stats["platform"] += 1
         for f in ex.fabs:
-            key = _hash(f.maker, f.fab_site, f.generation, f.status)
+            key = _hash(f.maker, f.generation, f.technology, f.status)  # 同廠同世代同狀態視為同一則（廠區名稱各家報導寫法不一）
             if not db.has_recent_event(key):
                 db.add_event("fab", f.status or "other", f.model_dump(mode="json"), conf.value, article.url, article.source, key)
                 stats["fab"] += 1
