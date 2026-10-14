@@ -83,7 +83,13 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         _fmt(s.vrr_tech), f"Mini LED {s.mini_led_zones} 區" if s.mini_led_zones else "",
         f"{s.dimming} 調光" if s.dimming else "", f"PWM {s.pwm_hz:g}Hz" if s.pwm_hz else "",
         _fmt(s.low_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),
-        "觸控" if s.touch else "", s.surface or ""] if x)
+        s.surface or ""] if x)
+    if s.touch is True:
+        touch = "支援觸控" + (f"・觸控筆 {s.stylus}" if s.stylus else "")
+    elif s.touch is False:
+        touch = "不支援觸控"
+    else:
+        touch = f"觸控筆 {s.stylus}" if s.stylus else ""
     derived = "・".join(x for x in [f"{rec.ppi:g} PPI" if rec.ppi else "", rec.aspect_ratio or "",
                                     f"像素密度{rec.density_class}" if rec.density_class else "",
                                     ("面板原廠規格：" + "、".join(FIELD_LABELS.get(f, f) for f in rec.panel_spec_fields))
@@ -93,7 +99,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     return {
         "score": f"{known}/{total}", "score_pct": round(known / total * 100), "missing": "、".join(analytics.missing_fields(rec)),
         "key": rec.key, "rec": rec, "brand": s.brand or "", "model": s.model or "",
-        "screen": screen, "bright": bright, "panel": panel or "面板來源待確認", "panel_known": bool(panel),
+        "screen": screen, "bright": bright, "touch": touch, "panel": panel or "面板來源待確認", "panel_known": bool(panel),
         "extras": extras, "derived": derived, "tags": tags or [],
         "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
         "source_name": rec.source_name, "source_url": rec.source_url, "changes": change_text,

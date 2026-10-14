@@ -33,7 +33,7 @@ collection:
     max_ai_calls: 40
     enrich_models: 25
   # 補完規則（目標：上市滿 30 天的機型規格完整度 75%）
-  enrich_target: 9                    # 12 項重點規格中已知 9 項（75%）就不再補查，把額度留給其他機型
+  enrich_target: 10                   # 13 項重點規格中已知 10 項（約 75%）就不再補查，把額度留給其他機型
   enrich_schedule_days: [0, 14, 35]   # 補查時間：第一次立刻查，之後在上市第 14、35 天再查（配合評測出現）
   enrich_retry_days: 6                # 兩次補查至少間隔幾天
   enrich_within_days: 60              # 只補查 60 天內出現的機型

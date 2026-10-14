@@ -400,13 +400,13 @@ def test_completeness_and_candidates(db):
     sparse = _rec("s", 2, brand="HP", model="OmniBook 5", panel_tech="OLED")
     rich = _rec("r", 2, brand="ASUS", model="ProArt P16", panel_tech="OLED", size_inch=16, res_w=3840, res_h=2400,
                 refresh_hz=120, sdr_nits=500, dci_p3_pct=100, panel_maker="Samsung Display", panel_model="ATNA60",
-                response_ms=0.2, dimming="DC", surface="glossy", delta_e=1)
+                response_ms=0.2, dimming="DC", surface="glossy", delta_e=1, touch=False)
     rumor = _rec("d", 2, Confidence.D, brand="Apple", model="MacBook Pro")
     old = _rec("o", 90, brand="HP", model="Old")
-    assert analytics.completeness(rich) == (12, 12) and analytics.completeness(sparse)[0] == 1
+    assert analytics.completeness(rich) == (13, 13) and analytics.completeness(sparse)[0] == 1
     for r in (sparse, rich, rumor, old):
         db.put_panel(r)
-    col = {"enrich_target": 9, "enrich_within_days": 60, "enrich_schedule_days": [0, 14, 35], "enrich_retry_days": 6}
+    col = {"enrich_target": 10, "enrich_within_days": 60, "enrich_schedule_days": [0, 14, 35], "enrich_retry_days": 6}
     assert [[r.key for r in g] for g in enrich.candidates(db, col)] == [["s"]]  # 已達標、傳聞、太舊都排除
     # 第一次補查後，要等到上市第 14 天才會再查
     sparse.enrich_attempts, sparse.last_enriched = 1, utcnow() - timedelta(days=7)
@@ -525,5 +525,17 @@ def test_mature_completeness():
             _rec("b", 40, brand="HP", model="A", panel_tech="OLED", refresh_hz=120, size_inch=14, sdr_nits=400),
             _rec("c", 5, brand="HP", model="New", panel_tech="OLED")]
     v, n = analytics.mature_completeness(recs, utcnow())
-    assert n == 1 and abs(v - 4 / 12) < 1e-9  # 同機型取最完整的選配；未滿 30 天的不算
+    assert n == 1 and abs(v - 4 / 13) < 1e-9  # 同機型取最完整的選配；未滿 30 天的不算
     assert analytics.mature_completeness(recs[2:], utcnow()) == (None, 0)
+
+
+
+def test_touch_display(tmp_path, db):
+    from display_intel.report import panel_card
+    yes = panel_card(_rec("t1", 1, brand="HP", model="A", touch=True, stylus="MPP 2.0"))
+    no = panel_card(_rec("t2", 1, brand="HP", model="B", touch=False))
+    unknown = panel_card(_rec("t3", 1, brand="HP", model="C"))
+    assert yes["touch"] == "支援觸控・觸控筆 MPP 2.0" and no["touch"] == "不支援觸控" and unknown["touch"] == ""
+    # 「不支援觸控」也算已知，計入完整度
+    from display_intel import analytics
+    assert "觸控" not in analytics.missing_fields(no["rec"]) and "觸控" in analytics.missing_fields(unknown["rec"])

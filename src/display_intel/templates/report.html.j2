@@ -15,6 +15,7 @@
     {% if c.options|length > 1 %}<div style="font-size:11px;color:#999;">選配 {{ loop.index }}</div>{% endif %}
     {% if o.screen %}<div style="font-size:14px;line-height:1.6;">🖥 {{ o.screen }}</div>{% endif %}
     {% if o.bright %}<div style="font-size:14px;line-height:1.6;">☀ {{ o.bright }}</div>{% endif %}
+    <div style="font-size:14px;line-height:1.6;{% if not o.touch %}color:#999;{% endif %}">👆 {{ o.touch or "觸控：未標示" }}</div>
     <div style="font-size:14px;line-height:1.6;{% if not o.panel_known %}color:#999;{% endif %}">🏭 {{ o.panel }}</div>
     {% if o.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ o.extras }}</div>{% endif %}
     {% if o.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ o.derived }}</div>{% endif %}
@@ -61,7 +62,7 @@
 
   {% if new_panels %}
   {{ h2("新機型與新面板（" ~ new_panels|length ~ "）") }}
-  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">{{ panel_known }} 款已知面板來源。🖥 螢幕　☀ 亮度與色彩　🏭 面板廠與型號</div>
+  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">{{ panel_known }} 款已知面板來源。🖥 螢幕　☀ 亮度與色彩　👆 觸控　🏭 面板廠與型號</div>
   {% for c in new_panels %}{{ card(c) }}{% endfor %}
   {% endif %}
 

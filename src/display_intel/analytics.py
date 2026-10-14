@@ -26,7 +26,7 @@ FEATURES = [
 ]
 
 
-# 規格完整度的 12 項重點欄位（標籤 → 判斷是否已知）
+# 規格完整度的 13 項重點欄位（標籤 → 判斷是否已知）
 KEY_FIELDS = [
     ("尺寸", lambda r: bool(r.spec.size_inch or r.size_inferred)),
     ("解析度", lambda r: bool(r.spec.res_w and r.spec.res_h)),
@@ -40,6 +40,7 @@ KEY_FIELDS = [
     ("調光方式", lambda r: bool(r.spec.dimming or r.spec.pwm_hz or r.spec.eye_care)),
     ("表面處理", lambda r: bool(r.spec.surface)),
     ("色準或 HDR", lambda r: bool(r.spec.delta_e or r.spec.certifications or r.spec.hdr_formats)),
+    ("觸控", lambda r: r.spec.touch is not None),
 ]
 
 

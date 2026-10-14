@@ -1,7 +1,7 @@
 """規格補完 agent：針對缺少重點規格的機型，主動搜尋官方規格文件與深度評測，再萃取一次。
 
 流程（以「機型」為單位，同一款的多種螢幕選配一起處理）：
-1. 挑選非傳聞、完整度未達目標（預設 9/12 = 75%）、到了回訪時間的機型
+1. 挑選非傳聞、完整度未達目標（預設 10/13 ≈ 75%）、到了回訪時間的機型
    回訪時間：第一次立刻補查，之後在上市第 14、35 天再查（配合深度評測出現的時間）
 2. 每款搜尋 2 次：
    - 深度評測（Notebookcheck 等）：面板型號、實測亮度、色域、ΔE、反應時間、PWM
@@ -132,7 +132,8 @@ def search_specs(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -
     brand_key = (rec.spec.brand or "").lower().split()[0] if rec.spec.brand else ""
     searches = [(f"{name} review display panel", REVIEW_DOMAINS)]
     official = BRAND_DOMAINS.get(brand_key)
-    searches.append((f"{name} specifications display", official) if official else (f"{name} specifications display nits", None))
+    searches.append((f"{name} specifications display touchscreen", official) if official
+                    else (f"{name} specifications display nits touchscreen", None))
     target = verify.model_norm(rec.spec)
     out, seen = [], set()
     for query, domains in searches:
