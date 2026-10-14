@@ -1,0 +1,9 @@
+[project]
+name = "display-intel"
+version = "0.1.0"
+description = "筆電／AIO 顯示器市場情報 agent"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

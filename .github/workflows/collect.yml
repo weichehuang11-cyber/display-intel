@@ -1,0 +1,45 @@
+# 每天清晨蒐集與萃取（台灣時間約 06:17 開始，08:35 前收工）
+name: 1. 每日蒐集
+
+on:
+  schedule:
+    - cron: "17 22 * * *"   # UTC 22:17 = 台灣時間 06:17
+  workflow_dispatch:          # 允許在 Actions 頁面手動執行
+
+permissions:
+  contents: write   # 把資料庫存回 repo
+  models: read      # 使用 GitHub Models 免費 AI
+
+concurrency:
+  group: database
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 蒐集、萃取、查核
+        env:
+          PYTHONPATH: src
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: python -m display_intel collect
+      - name: 儲存資料庫
+        if: always()
+        run: |
+          git config user.name "display-intel-bot"
+          git config user.email "display-intel-bot@users.noreply.github.com"
+          git add data/intel.sqlite 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "data: 每日蒐集 $(TZ=Asia/Taipei date +%F)"
+          git pull --rebase -X theirs || true
+          git push

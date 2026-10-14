@@ -1,0 +1,67 @@
+# 每天產生報告，09:30 準時寄出（台灣時間 08:47 啟動，預留 GitHub 排程延遲的緩衝）
+name: 2. 每日報告
+
+on:
+  schedule:
+    - cron: "47 0 * * *"    # UTC 00:47 = 台灣時間 08:47
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "test = 只產生報告不寄信；now = 立刻寄出"
+        type: choice
+        options: [test, now]
+        default: test
+
+permissions:
+  contents: write
+  models: read
+
+concurrency:
+  group: database
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 產生並寄送報告
+        env:
+          PYTHONPATH: src
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          REPORT_RECIPIENTS: ${{ secrets.REPORT_RECIPIENTS }}
+        run: |
+          if [ "${{ inputs.mode }}" = "test" ]; then
+            python -m display_intel report --dry-run
+          elif [ "${{ inputs.mode }}" = "now" ]; then
+            python -m display_intel report --no-wait
+          else
+            python -m display_intel report
+          fi
+      - name: 保存報告檔（可在 Actions 頁面下載）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ github.run_id }}
+          path: output/
+          retention-days: 30
+      - name: 儲存資料庫
+        if: always() && inputs.mode != 'test'
+        run: |
+          git config user.name "display-intel-bot"
+          git config user.email "display-intel-bot@users.noreply.github.com"
+          git add data/intel.sqlite 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "data: 報告已寄出 $(TZ=Asia/Taipei date +%F)"
+          git pull --rebase -X theirs || true
+          git push

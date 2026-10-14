@@ -1,0 +1,93 @@
+# 顯示器情報 Agent 設定檔
+# 非工程人員也可以修改這個檔案：新增來源、關鍵字、調整時間。
+# 修改後先執行 `python -m display_intel check-sources` 確認來源可以連線。
+
+schedule:
+  timezone: Asia/Taipei
+  send_at: "09:30"          # 準時寄出的時間
+  collect_deadline: "08:35" # 蒐集與萃取最晚到這個時間就收工，把資料交給報告階段
+  lookback_hours: 26        # 抓多久以內的文章（略大於 24 小時，避免時區落差漏抓）
+
+llm:
+  # ===== 免費版（預設）=====
+  # GitHub Models：在 GitHub Actions 內免費使用，有每日次數上限。
+  # 可用模型清單：https://github.com/marketplace?type=models（模型名稱若變動，改這裡即可）
+  provider: github_models
+  extract_model: openai/gpt-4o-mini
+  summary_model: openai/gpt-4o-mini
+  max_calls_per_run: 40             # 每天最多呼叫幾次 AI（免費額度內）
+  min_seconds_between_calls: 8      # 每次呼叫間隔，避免超過每分鐘上限
+  max_chars_per_call: 6000          # 每次送給 AI 的文字量（免費模型輸入長度有限）
+  max_chars_per_article: 2500
+  max_output_tokens: 4000
+
+  # ===== 升級成 Claude（付費，品質最好）=====
+  # 把上面幾行換成下面這組，並在 GitHub Secrets 加上 ANTHROPIC_API_KEY：
+  # provider: anthropic
+  # extract_model: claude-sonnet-5-5
+  # summary_model: claude-sonnet-5-5
+  # max_calls_per_run: 150
+  # min_seconds_between_calls: 0
+  # max_chars_per_call: 40000
+  # max_chars_per_article: 8000
+  # max_output_tokens: 8000
+
+# 來源類型決定預設可信度：official=A、review=B、media=C、aggregator=C、social=D
+# 上線前請用 check-sources 確認每個網址可用，不能用的刪掉或換掉即可，程式不會因單一來源失敗而中斷。
+sources:
+  rss:
+    # --- 歐美評測與科技媒體 ---
+    - {name: The Verge, url: "https://www.theverge.com/rss/index.xml", type: media, lang: en}
+    - {name: Liliputing, url: "https://liliputing.com/feed", type: media, lang: en}
+    - {name: Tom's Hardware, url: "https://www.tomshardware.com/feeds/all", type: review, lang: en}
+    - {name: Windows Central, url: "https://www.windowscentral.com/rss", type: media, lang: en}
+    - {name: Notebookcheck, url: "https://www.notebookcheck.net/RSS-Feed-Notebook-Reviews.8156.0.html", type: review, lang: en}
+    # --- 平台廠 ---
+    - {name: NVIDIA Blog, url: "https://blogs.nvidia.com/feed/", type: official, lang: en}
+    # --- 面板與產業 ---
+    - {name: TheElec, url: "https://www.thelec.net/rss/allArticle.xml", type: media, lang: en}
+    # --- 亞洲媒體 ---
+    - {name: 科技新報, url: "https://technews.tw/feed/", type: media, lang: zh-TW}
+    - {name: IT之家, url: "https://www.ithome.com/rss/", type: media, lang: zh-CN}
+    - {name: PC Watch, url: "https://pc.watch.impress.co.jp/data/rss/1.0/pcw/feed.rdf", type: media, lang: ja}
+    # --- 社群 ---
+    - {name: Reddit r/laptops, url: "https://www.reddit.com/r/laptops/new/.rss", type: social, lang: en}
+    - {name: Reddit r/OLED, url: "https://www.reddit.com/r/OLED/new/.rss", type: social, lang: en}
+
+  # Google 新聞搜尋（免費、跨語言），每組查詢會在各語系各跑一次
+  google_news:
+    locales:
+      - {hl: en-US, gl: US, ceid: "US:en", lang: en}
+      - {hl: zh-TW, gl: TW, ceid: "TW:zh-Hant", lang: zh-TW}
+      - {hl: zh-CN, gl: CN, ceid: "CN:zh-Hans", lang: zh-CN}
+      - {hl: ja, gl: JP, ceid: "JP:ja", lang: ja}
+      - {hl: ko, gl: KR, ceid: "KR:ko", lang: ko}
+    queries:
+      en: ["laptop OLED display", "laptop display panel", "notebook Mini LED", "laptop 240Hz display", "IT OLED fab", "G-SYNC laptop", "FreeSync laptop display"]
+      zh-TW: ["筆電 OLED 螢幕", "筆電 面板", "OLED 世代線"]
+      zh-CN: ["笔记本 OLED 屏幕", "笔记本 屏幕 面板", "OLED 8.6代线"]
+      ja: ["ノートPC 有機EL", "ノートPC 液晶"]
+      ko: ["노트북 OLED", "IT OLED 8.6세대"]
+
+  # Tavily 搜尋 API（選用，需 TAVILY_API_KEY）
+  tavily:
+    max_results: 10
+    queries:
+      - "new laptop OLED display specifications"
+      - "laptop display panel BOE AUO Samsung Display LG Display"
+      - "Intel NVIDIA AMD Qualcomm laptop display technology"
+      - "Gen 8.6 IT OLED production"
+
+# 文章初篩關鍵字（不分大小寫）。標題或摘要需「同時」命中兩組才會送進 AI，節省成本。
+keywords:
+  device: [laptop, notebook, "all-in-one", aio, ultrabook, "2-in-1", 筆電, 笔记本, 筆記型, 一體機, 一体机, ノートPC, ノートパソコン, 노트북]
+  display: [display, screen, panel, oled, lcd, "mini led", "mini-led", ips, nits, hz, refresh, hdr, pwm, 螢幕, 屏幕, 面板, 屏, 液晶, 有機el, ディスプレイ, 디스플레이, 패널]
+  platform_vendor: [intel, nvidia, amd, qualcomm, snapdragon, "g-sync", freesync, optimus, evo]
+  panel_maker: [boe, auo, innolux, "samsung display", "lg display", sharp, csot, tianma, visionox, 京東方, 京东方, 友達, 友达, 群創, 群创, 華星, 华星, 天馬, 天马, 维信诺]
+  fab: [fab, "gen 8.6", "8.6-gen", "8.6세대", "8.6代", "g8.6", "generation", capacity, 產線, 产线, 世代線, 代线, 量產, 量产]
+
+report:
+  subject_prefix: "[顯示器情報]"
+  ongoing_days: 30          # 「持續討論中」回看天數
+  output_dir: output
+  database: data/intel.sqlite

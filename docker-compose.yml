@@ -1,0 +1,13 @@
+# NAS 用：資料庫與報告存在 NAS 的資料夾，金鑰放在 .env
+# 在 NAS 的「任務排程表」設定每天 06:15 執行：docker compose -f /volume1/docker/display-intel/docker-compose.yml run --rm agent
+services:
+  agent:
+    build: .
+    env_file: .env
+    environment:
+      - TZ=Asia/Taipei
+    volumes:
+      - ./data:/app/data        # 資料庫
+      - ./output:/app/output    # 每日報告 HTML 與 Excel（可設為共用資料夾）
+      - ./config.yaml:/app/config.yaml
+    command: ["run"]

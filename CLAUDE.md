@@ -1,0 +1,57 @@
+# CLAUDE.md
+
+給接手這個專案的 Claude Code（或工程師）的說明。
+
+## 專案目的
+
+每日自動蒐集全球 Notebook／Laptop／AIO 顯示螢幕規格（LCD、OLED）、平台廠顯示技術、面板廠技術能力與世代線，台灣時間 09:30 寄出報告。主要用途：市場情報與技術規格收集。
+
+使用者沒有程式背景：**所有說明、log、報告、錯誤訊息都用繁體中文**；設定集中在 `config.yaml`，讓非工程人員能在 GitHub 網頁上修改。
+
+## 架構
+
+```
+collect.py  蒐集：RSS、Google 新聞 RSS（多語系）、Tavily（選用）→ 關鍵字初篩 → 補抓全文
+verify.py   去重（網址＋標題相似度）→ AI 萃取後合併到資料庫、可信度、傳聞追蹤
+extract.py  萃取：多篇文章一批送 AI，輸出 JSON；回來後逐字比對原文依據
+derive.py   衍生規格（PPI、長寬比、像素密度）、合理性檢查、原文依據檢查
+llm.py      AI 介面：github_models（預設免費）/ gemini / anthropic，內建節流與額度保護
+db.py       SQLite（data/intel.sqlite，由 GitHub Actions commit 回 repo）
+report.py   未報告事件 → HTML Email（templates/report.html.j2）＋ Excel
+mailer.py   Gmail SMTP（應用程式密碼）
+__main__.py 總控：collect / report / run / check-sources / test-email / demo
+demo.py     虛構範例資料，不需金鑰即可產生報告
+```
+
+排程（`.github/workflows/`）：`collect.yml` 06:17 台灣時間；`report.yml` 08:47 啟動、等到 09:30 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
+
+## 核心規則（修改時務必維持）
+
+1. **防幻覺**：每個規格欄位都必須有逐字出自文章的 evidence，否則 `derive.enforce_evidence` 會刪除。不要放寬這條規則。
+2. **衍生規格由程式計算**，不從文章抄。
+3. **可信度**：A 官方、B 實測、C 媒體／彙整、D 傳聞、E 待確認（不進日報）。低可信度來源不能覆蓋高可信度數值；D 被 C 以上證實時產生 `rumor_confirmed` 事件。
+4. **單一來源或單批失敗不中斷流程**；額度用完（`BudgetExceeded`）時停止萃取，用已完成的部分出報告。
+5. **09:30 一定要寄出**：報告失敗時寄失敗通知給 SMTP_USER。
+6. 事件寄出成功後才 `mark_reported`；dry-run 不標記。
+
+## 開發
+
+```bash
+pip install -r requirements.txt
+export PYTHONPATH=src
+python -m pytest -q          # 全部測試不需網路與金鑰
+python -m display_intel demo # 產生 output/report-日期.html
+```
+
+新增功能時同步加測試到 `tests/test_core.py`。
+
+## 已知限制與待辦
+
+- 可信度目前是「整筆紀錄」層級，設計文件要求「欄位層級」（每個欄位各自記來源與等級）
+- Google 新聞連結是轉址頁，抓不到全文，只有摘要
+- 社群只有 Reddit RSS；X、微博需付費 API 或第三方服務
+- 面板廠世代線尚未有獨立的能力檔案資料表（目前以 fab 事件記錄），每月對照表未實作
+- 爆料者命中率統計未實作
+- 週趨勢只在週一、近 30 天紀錄 ≥ 5 筆時出現
+
+設計文件（完整 Schema、來源清單、路線圖）在使用者的 claude.ai「筆電顯示器情報 AI Agent 系統設計」文件中。

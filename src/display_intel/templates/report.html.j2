@@ -1,0 +1,105 @@
+{%- macro src(r) -%}{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1f5fa8;text-decoration:none;">{{ r.source_name or "來源" }}</a>{% endif %}{%- endmacro -%}
+{%- macro badge(code, label) -%}
+{%- set colors = {"A": "#1e7d4f", "B": "#2f6fb0", "C": "#6b6b6b", "D": "#b4580a", "E": "#999"} -%}
+<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;color:#fff;background:{{ colors.get(code, '#6b6b6b') }};">{{ label }}</span>
+{%- endmacro -%}
+{%- macro panel_table(rows, show_changes=False) -%}
+<table cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:13px;">
+  <tr style="background:#eef2f7;text-align:left;">
+    <th>機型</th><th>螢幕</th><th>亮度／色域</th><th>面板來源</th><th>{% if show_changes %}變更{% else %}其他{% endif %}</th><th>來源</th>
+  </tr>
+  {% for r in rows %}
+  <tr style="border-top:1px solid #e3e6ea;vertical-align:top;">
+    <td><b>{{ r.brand }}</b><br>{{ r.model }}</td>
+    <td>{{ r.size }} {{ r.tech }}<br>{{ r.res }} {{ r.refresh }}{% if r.ppi %}<br><span style="color:#777;">{{ r.ppi }} PPI・{{ r.aspect }}・{{ r.density }}</span>{% endif %}</td>
+    <td>{{ r.brightness }}{% if r.color %}<br>{{ r.color }}{% endif %}</td>
+    <td>{{ r.panel_src }}</td>
+    <td>{% if show_changes %}{{ r.changes }}{% else %}{{ r.extras }}{% endif %}</td>
+    <td>{{ badge(r.conf_code, r.confidence) }}<br>{{ src(r) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{%- endmacro -%}
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ subject }}</title></head>
+<body style="margin:0;padding:0;background:#f5f6f8;font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;color:#222;">
+<div style="max-width:880px;margin:0 auto;padding:20px 16px;background:#fff;">
+
+  <h1 style="font-size:20px;margin:0 0 4px;">筆電顯示器情報日報</h1>
+  <div style="color:#777;font-size:13px;margin-bottom:16px;">{{ date }}（週{{ weekday }}）・資料期間：前一日 09:30 至今</div>
+
+  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">今日重點</h2>
+  <ul style="font-size:14px;line-height:1.7;padding-left:20px;">
+    {% for h in highlights %}<li>{{ h }}</li>{% endfor %}
+  </ul>
+
+  {% if new_panels %}
+  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">新機型與新面板（{{ new_panels|length }}）</h2>
+  {{ panel_table(new_panels) }}
+  {% endif %}
+
+  {% if updates %}
+  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">規格更新（{{ updates|length }}）</h2>
+  {{ panel_table(updates, show_changes=True) }}
+  {% endif %}
+
+  {% if platform %}
+  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">平台技術動態（{{ platform|length }}）</h2>
+  {% for r in platform %}
+  <p style="font-size:14px;line-height:1.6;margin:8px 0;"><b>{{ r.vendor }}｜{{ r.tech }}</b> <span style="color:#777;">{{ r.category }}</span><br>
+    {{ r.summary }}{% if r.affected %} <span style="color:#777;">影響規格：{{ r.affected }}</span>{% endif %}<br>{{ badge("A" if r.confidence == "官方" else "C", r.confidence) }} {{ src(r) }}</p>
+  {% endfor %}
+  {% endif %}
+
+  {% if fabs or industry %}
+  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">面板廠與產業動態</h2>
+  {% for r in fabs %}
+  <p style="font-size:14px;line-height:1.6;margin:8px 0;"><b>{{ r.maker }}</b> {{ r.site }} {{ r.gen }} {{ r.tech }} <span style="color:#777;">［{{ r.status }}{% if r.milestone %}・{{ r.milestone }}{% endif %}{% if r.capacity %}・月產能 {{ "{:,}".format(r.capacity) }} 片{% endif %}］</span><br>
+    {{ r.summary }} {{ src(r) }}</p>
+  {% endfor %}
+  {% for r in industry %}
+  <p style="font-size:14px;line-height:1.6;margin:8px 0;">・{{ r.note }} {{ src(r) }}</p>
+  {% endfor %}
+  {% endif %}
+
+  {% if confirmed %}
+  <h2 style="font-size:16px;border-left:4px solid #1e7d4f;padding-left:8px;">傳聞已證實（{{ confirmed|length }}）</h2>
+  {{ panel_table(confirmed) }}
+  {% endif %}
+
+  {% if rumor_panels or platform_rumors or fab_rumors %}
+  <h2 style="font-size:16px;border-left:4px solid #b4580a;padding-left:8px;">傳聞與爆料（未經證實）</h2>
+  {% if rumor_panels %}{{ panel_table(rumor_panels) }}{% endif %}
+  {% for r in platform_rumors %}<p style="font-size:14px;margin:8px 0;">・<b>{{ r.vendor }} {{ r.tech }}</b>：{{ r.summary }} {{ src(r) }}</p>{% endfor %}
+  {% for r in fab_rumors %}<p style="font-size:14px;margin:8px 0;">・<b>{{ r.maker }} {{ r.gen }}</b>：{{ r.summary }} {{ src(r) }}</p>{% endfor %}
+  {% endif %}
+
+  {% if ongoing %}
+  <h2 style="font-size:16px;border-left:4px solid #999;padding-left:8px;">持續討論中</h2>
+  {% for group in ongoing %}
+  <p style="font-size:14px;margin:8px 0 4px;"><b>{{ group.label }}</b>（今日無新消息）</p>
+  {% if group.entries %}
+  <ul style="font-size:13px;line-height:1.6;padding-left:20px;margin-top:0;">
+    {% for it in group.entries %}<li>{{ it.title }} <span style="color:#777;">最後出現 {{ it.date }}</span>{% if it.source_url %} <a href="{{ it.source_url }}" style="color:#1f5fa8;text-decoration:none;">來源</a>{% endif %}</li>{% endfor %}
+  </ul>
+  {% else %}<p style="font-size:13px;color:#777;margin-top:0;">近期也沒有相關紀錄。</p>{% endif %}
+  {% endfor %}
+  {% endif %}
+
+  {% if trend %}
+  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">週趨勢（近 30 天 {{ trend.count }} 筆紀錄）</h2>
+  <p style="font-size:14px;line-height:1.7;">
+    面板技術：{% for k, v in trend.tech %}{{ k }} {{ v }}{% if not loop.last %}、{% endif %}{% endfor %}<br>
+    {% if trend.refresh %}常見刷新率：{% for k, v in trend.refresh %}{{ k }}（{{ v }}）{% if not loop.last %}、{% endif %}{% endfor %}<br>{% endif %}
+    {% if trend.makers %}面板廠：{% for k, v in trend.makers %}{{ k }}（{{ v }}）{% if not loop.last %}、{% endif %}{% endfor %}{% endif %}
+  </p>
+  {% endif %}
+
+  <hr style="border:none;border-top:1px solid #e3e6ea;margin:24px 0 12px;">
+  <p style="font-size:12px;color:#888;line-height:1.6;">
+    可信度：{{ badge("A", "官方") }} 品牌或廠商公布　{{ badge("B", "實測") }} 評測或拆機　{{ badge("C", "媒體報導") }} 媒體或彙整　{{ badge("D", "傳聞") }} 社群爆料<br>
+    完整規格表見附件 Excel。每個數值都經過原文比對，找不到原文依據的數值不會出現在報告中。<br>
+    本報告由 Display Intel agent 自動產生。
+  </p>
+</div>
+</body></html>

@@ -1,0 +1,19 @@
+# 程式有修改時自動測試
+name: 測試
+
+on:
+  push:
+    paths: ["src/**", "tests/**", "requirements.txt"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q

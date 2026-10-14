@@ -1,0 +1,161 @@
+# Display Intel：筆電顯示器情報 Agent
+
+每天自動蒐集全球 Notebook、Laptop、AIO 的螢幕規格（LCD／OLED）、平台廠（Intel、NVIDIA、AMD、Qualcomm）顯示技術、面板廠世代線動態，台灣時間 **09:30** 把整理好的報告寄到你的信箱，附完整 Excel 規格表。
+
+- 全部在 GitHub 雲端執行，**你的電腦不用開機**
+- 預設**完全免費**：GitHub Actions＋GitHub Models 免費 AI＋Gmail
+- 每個數值都經過原文比對，AI 讀錯或亂編的數字會被自動刪除
+
+---
+
+## 第一次設定（約 20 分鐘，全部在網頁上完成）
+
+> 不需要寫程式。照著做，遇到畫面和說明不一樣，截圖問 Claude 即可。
+
+### 步驟 1：申請 Gmail「應用程式密碼」
+
+報告會從你的 Gmail 寄出。Google 不允許程式直接用登入密碼，需要另外產生一組專用密碼。
+
+1. 用電腦打開 <https://myaccount.google.com/security>
+2. 確認「**兩步驟驗證**」是「開啟」。如果是關閉，先點進去開啟（需要手機）
+3. 打開 <https://myaccount.google.com/apppasswords>
+4. 「應用程式名稱」輸入 `display-intel`，按「**建立**」
+5. 畫面會出現 16 個英文字母（例如 `abcd efgh ijkl mnop`），**複製下來**，等一下要用。這組密碼只會顯示一次
+
+### 步驟 2：把金鑰存進 GitHub（Secrets）
+
+Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都看不到內容，只有程式執行時能用。
+
+1. 打開你的 repo 頁面（網址像 `https://github.com/你的帳號/display-intel`）
+2. 點上方的 **Settings**（齒輪圖示，在最右邊）
+3. 左側選單找到 **Secrets and variables** → 點 **Actions**
+4. 點綠色按鈕 **New repository secret**，依序新增以下三個（每個新增完按 **Add secret**）：
+
+| Name（名稱，要一模一樣） | Secret（內容） |
+| --- | --- |
+| `SMTP_USER` | 你的 Gmail 地址，例如 `abc@gmail.com` |
+| `SMTP_PASSWORD` | 步驟 1 複製的 16 個字母（空格可留可不留） |
+| `REPORT_RECIPIENTS` | 收報告的信箱，多個用英文逗號分隔，例如 `abc@gmail.com,boss@company.com` |
+
+AI 不需要另外申請金鑰：GitHub 會自動提供免費額度。
+
+### 步驟 3：確認 Actions 已開啟
+
+1. 點 repo 上方的 **Actions** 分頁
+2. 如果看到「Workflows aren't being run on this repository」或綠色按鈕「**I understand my workflows, go ahead and enable them**」，點它
+3. 左側應該看到三個項目：`1. 每日蒐集`、`2. 每日報告`、`測試`
+
+### 步驟 4：第一次手動測試
+
+**4-1 測試寄信與報告格式（不寄信，約 2 分鐘）**
+
+1. Actions → 左側點 **2. 每日報告** → 右側點 **Run workflow** → mode 選 `test` → 按綠色 **Run workflow**
+2. 等約 1–2 分鐘，列表出現綠色勾勾 ✓ 代表成功
+3. 點進那一次執行 → 頁面最下方 **Artifacts** → 下載 `report-...`，解壓縮後用瀏覽器打開 `report-日期.html`
+
+（第一次資料庫是空的，報告會顯示「今日沒有新消息」，這是正常的。）
+
+**4-2 跑一次真正的蒐集（約 20–40 分鐘）**
+
+1. Actions → **1. 每日蒐集** → **Run workflow** → **Run workflow**
+2. 執行中是黃色圓圈，可以關掉網頁，晚點再回來看
+3. 完成後點進去 → 點 `collect` → 展開「蒐集、萃取、查核」，最後幾行會顯示抓到幾篇文章、新增幾筆規格
+
+**4-3 立刻寄一封真的報告**
+
+1. Actions → **2. 每日報告** → **Run workflow** → mode 選 `now` → **Run workflow**
+2. 幾分鐘後檢查信箱（第一次可能在「垃圾郵件」，請標示為「非垃圾郵件」）
+
+### 步驟 5：完成！
+
+之後每天會自動執行，不用再做任何事：
+
+| 台灣時間 | 動作 |
+| --- | --- |
+| 06:17 | 開始蒐集全球新聞、AI 萃取規格（最晚 08:35 收工） |
+| 08:47 | 產生報告，等待到 09:30 |
+| 09:30 | 寄出報告 |
+
+> GitHub 的免費排程在尖峰時段偶爾會延遲 10–30 分鐘，所以報告階段提早啟動預留緩衝。
+
+---
+
+## 日常調整（都在網頁上改 `config.yaml`）
+
+在 repo 首頁點 `config.yaml` → 右上角鉛筆圖示 ✏️ 編輯 → 改完按 **Commit changes**。
+
+| 想做的事 | 改哪裡 |
+| --- | --- |
+| 新增或刪除新聞來源 | `sources:` 底下的 `rss:` 清單，照現有格式新增一行 |
+| 新增搜尋關鍵字 | `google_news:` → `queries:` |
+| 讓更多文章被收進來 | `keywords:` 底下加詞 |
+| 改寄送時間 | `schedule:` → `send_at`（也要同步改 `.github/workflows/report.yml` 的 cron） |
+| 改信件標題 | `report:` → `subject_prefix` |
+
+改來源後建議手動跑一次「1. 每日蒐集」，看紀錄裡「來源統計」有沒有某個來源一直是 0 篇（代表網址失效）。
+
+---
+
+## 常見問題
+
+**Q：Actions 出現紅色 ✗ 失敗怎麼辦？**
+點進那次執行，展開紅色的步驟，把最後 20 行複製給 Claude 看。常見原因：
+- `Gmail 登入失敗` → SMTP_PASSWORD 打錯，或沒開兩步驟驗證
+- `401` 或 `403` 出現在 models.github.ai → AI 免費額度暫時無法使用，隔天通常恢復
+- `unknown model` 或 `404` → 免費模型名稱改了：到 <https://github.com/marketplace?type=models> 找一個 OpenAI 的 mini 模型，把 `config.yaml` 的 `extract_model` 和 `summary_model` 換成新名稱（格式如 `openai/xxx`）
+
+**Q：每天都會收到信嗎？沒有新消息也會寄？**
+會。沒有新消息時，報告會列出「持續討論中」的近期主題。若某天完全失敗，會寄一封「執行失敗通知」到寄件信箱。
+
+**Q：repo 要設公開（Public）還是私人（Private）？**
+建議 **Public**：公開 repo 的 Actions 執行時間不限，完全免費。程式和新聞資料本來就是公開資訊，金鑰存在 Secrets 不會外洩。Private 每月只有 2,000 分鐘，可能不夠用。
+
+**Q：60 天沒動 repo，排程會停嗎？**
+GitHub 會停用長期沒有活動的 repo 排程；本程式每天會把資料庫存回 repo，算是有活動。如果收到 GitHub 的停用通知信，到 Actions 頁面按「Enable workflow」即可。
+
+**Q：免費版能做到多完整？**
+大約是付費完整版的五到六成：每天約處理 80–120 篇文章，Google 新聞多數只有摘要，社群只有 Reddit。官方新聞、主要評測網、面板廠大新聞都能涵蓋。
+
+---
+
+## 升級：AI 換成 Claude（品質最有感的升級，每月約 US$20–60）
+
+1. 到 <https://console.anthropic.com> 註冊，儲值後建立 API Key
+2. GitHub → Settings → Secrets → 新增 `ANTHROPIC_API_KEY`
+3. 編輯 `config.yaml`：把 `llm:` 底下「免費版」那幾行前面加 `#`，把「升級成 Claude」那幾行前面的 `#` 拿掉
+
+其他選配：
+- 搜尋 API：到 <https://tavily.com> 申請（有免費額度），Secrets 新增 `TAVILY_API_KEY`，可補抓全文
+- Google Gemini：`provider: gemini`，Secrets 新增 `GEMINI_API_KEY`
+
+---
+
+## 進階：改在 NAS 執行
+
+NAS 準時度較好、資料留在自己手上。需要 NAS 支援 Docker（Synology 叫 Container Manager，QNAP 叫 Container Station）。
+
+1. 把整個 repo 下載到 NAS，例如 `/volume1/docker/display-intel`
+2. 在該資料夾建立 `.env`（照 `.env.example` 填），另外加上 `GH_MODELS_TOKEN=`：到 GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens 建立，權限勾選 **Models: Read**
+3. Synology「控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼」，使用者選 root，每天 06:15，指令：
+   ```
+   cd /volume1/docker/display-intel && docker compose run --rm agent
+   ```
+4. 報告會存在 `output/` 資料夾並寄出
+
+> NAS 版與 GitHub 版不要同時開啟，否則會收到兩封信。改用 NAS 後，到 GitHub Actions 把兩個每日排程按「Disable workflow」。
+
+---
+
+## 給開發者
+
+```bash
+pip install -r requirements.txt
+export PYTHONPATH=src
+python -m display_intel demo            # 用虛構資料產生範例報告，不需金鑰
+python -m display_intel check-sources   # 測試來源連線
+python -m display_intel collect         # 蒐集＋萃取
+python -m display_intel report --dry-run
+python -m pytest -q
+```
+
+架構與設計說明見 `CLAUDE.md`。
