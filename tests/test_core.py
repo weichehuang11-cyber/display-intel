@@ -539,3 +539,49 @@ def test_touch_display(tmp_path, db):
     # 「不支援觸控」也算已知，計入完整度
     from display_intel import analytics
     assert "觸控" not in analytics.missing_fields(no["rec"]) and "觸控" in analytics.missing_fields(unknown["rec"])
+
+
+# ---------- 平台適配 ----------
+
+def test_ihv_evaluate():
+    from display_intel import ihv
+    s = PanelSpec(brand="ASUS", model="ROG", cpu_platform="Intel Core Ultra 9 275HX", gpu="NVIDIA GeForce RTX 5080 Laptop",
+                  gpu_switching="MUX Switch", vrr_tech=["G-SYNC"], refresh_hz=240, certifications=["DisplayHDR True Black 600"])
+    assert ihv.cpu_vendor(s) == "Intel" and ihv.gpu_vendor(s) == "NVIDIA"
+    ev = {i["name"]: i["status"] for i in ihv.evaluate(s)}
+    assert ev == {"可變刷新率": "✓", "獨顯直連": "✓", "節能搭配": "?", "HDR": "✓", "平台認證": "?"}
+    # G-SYNC 卻是 AMD 獨顯 → 矛盾
+    bad = PanelSpec(brand="X", model="Y", gpu="AMD Radeon RX 7600S", vrr_tech=["G-SYNC"])
+    assert ihv.evaluate(bad)[0]["status"] == "✗"
+    # 只有內顯 → 獨顯直連不適用；1Hz 起的 VRR 算節能
+    thin = PanelSpec(brand="Lenovo", model="Yoga", cpu_platform="Qualcomm Snapdragon X Elite", vrr_range="1-120Hz",
+                     platform_certifications=["Copilot+ PC"])
+    ev = {i["name"]: i["status"] for i in ihv.evaluate(thin)}
+    assert ihv.cpu_vendor(thin) == "Qualcomm" and ev["獨顯直連"] == "—" and ev["節能搭配"] == "✓" and ev["平台認證"] == "✓"
+    assert not ihv.low_refresh(PanelSpec(vrr_range="48-165Hz")) and not ihv.low_refresh(PanelSpec(vrr_range="61-165Hz"))
+    # 一般 Optimus（無直連）
+    opt = PanelSpec(gpu="NVIDIA RTX 4050", gpu_switching="NVIDIA Optimus")
+    assert ihv.evaluate(opt)[1]["status"] == "✗"
+    assert ihv.cpu_vendor(PanelSpec(cpu_platform="AMD Ryzen AI 9 HX 370")) == "AMD"
+    assert ihv.cpu_vendor(PanelSpec(cpu_platform="Apple M4 Pro")) == "Apple"
+
+
+def test_platform_matrix_and_card(db, tmp_path):
+    from display_intel import ihv
+    from display_intel.db import utcnow
+    from display_intel.report import build_report
+    recs = [_rec("i1", 3, brand="HP", model="A", cpu_platform="Intel Core Ultra 7", panel_tech="OLED", refresh_hz=120),
+            _rec("a1", 3, brand="ASUS", model="B", cpu_platform="AMD Ryzen AI 9", gpu="NVIDIA RTX 5070", panel_tech="IPS LCD",
+                 refresh_hz=240, vrr_tech=["G-SYNC"])]
+    m = ihv.platform_matrix(recs, utcnow())
+    rows = {r["vendor"]: r for r in m["rows"]}
+    assert rows["Intel"]["oled"] == "100%" and rows["AMD"]["high_refresh"] == "100%" and rows["AMD"]["vrr"] == "1/1"
+    assert ihv.platform_matrix([_rec("u", 3, brand="X", model="Y")], utcnow()) is None
+    a = art("ASUS B", "ASUS B laptop with AMD Ryzen AI 9 and NVIDIA RTX 5070, 240Hz IPS display with G-SYNC.", source_type="official")
+    ex = Extraction(relevant=True, panels=[PanelSpec(brand="ASUS", model="B", cpu_platform="AMD Ryzen AI 9", gpu="NVIDIA RTX 5070",
+                                                     refresh_hz=240, vrr_tech=["G-SYNC"])])
+    verify.ingest(db, [(a, ex, [])])
+    ctx, html, xlsx, _ = build_report(db, {"schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}})
+    assert "🔌 AMD Ryzen AI 9・NVIDIA RTX 5070" in html and "可變刷新率" in html
+    import openpyxl
+    assert "平台適配" in openpyxl.load_workbook(xlsx).sheetnames

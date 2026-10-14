@@ -13,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
-from . import analytics
+from . import analytics, ihv
 from .db import DB
 from .panel_decode import canonical_maker
 from .schema import Confidence, PanelRecord, PanelSpec
@@ -31,6 +31,7 @@ FIELD_LABELS = {
     "response_ms": "反應時間", "vrr_tech": "VRR 技術", "backlight": "背光", "mini_led_zones": "Mini LED 分區",
     "dimming": "調光", "pwm_hz": "PWM 頻率", "low_power_tech": "節能技術", "eye_care": "護眼",
     "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
+    "cpu_platform": "處理器", "gpu": "顯示卡", "gpu_switching": "顯示切換", "platform_certifications": "平台認證",
 }
 VENDOR_ORDER = ["Intel", "NVIDIA", "AMD", "Qualcomm"]
 FAB_STATUS = {"planned": "規劃", "construction": "建廠", "equipment": "設備進駐", "trial": "試產",
@@ -99,7 +100,8 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     return {
         "score": f"{known}/{total}", "score_pct": round(known / total * 100), "missing": "、".join(analytics.missing_fields(rec)),
         "key": rec.key, "rec": rec, "brand": s.brand or "", "model": s.model or "",
-        "screen": screen, "bright": bright, "touch": touch, "panel": panel or "面板來源待確認", "panel_known": bool(panel),
+        "screen": screen, "bright": bright, "touch": touch,
+        "platform": ihv.platform_text(s), "ihv": ihv.evaluate(s), "panel": panel or "面板來源待確認", "panel_known": bool(panel),
         "extras": extras, "derived": derived, "tags": tags or [],
         "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
         "source_name": rec.source_name, "source_url": rec.source_url, "changes": change_text,
@@ -199,6 +201,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "matrix": analytics.brand_maker_matrix(all_records),
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
         "to_fill": analytics.to_fill(all_records, today),
+        "platform_matrix": ihv.platform_matrix(all_records, today),
     }
     # 卡片依機型合併（螢幕選配列在同一張卡片內）
     for k in ("new_panels", "updates", "confirmed", "rumor_panels"):
@@ -362,6 +365,16 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
     if m:
         ws4 = wb.create_sheet("品牌×面板廠")
         sheet(ws4, ["品牌"] + m["makers"], [[r["brand"]] + r["cells"] for r in m["rows"]])
+    ws6 = wb.create_sheet("平台適配")
+    names = [i["name"] for i in ihv.evaluate(PanelSpec())]
+    sheet(ws6, ["品牌", "機型", "螢幕", "處理器", "處理器平台", "顯示卡", "獨顯廠商", "顯示切換"] + names + ["說明"],
+          [[rec.spec.brand, rec.spec.model, f"{_fmt(rec.spec.size_inch)} {rec.spec.panel_tech or ''} {_fmt(rec.spec.refresh_hz)}Hz".strip(),
+            rec.spec.cpu_platform or "", ihv.cpu_vendor(rec.spec) or "", rec.spec.gpu or "", ihv.gpu_vendor(rec.spec) or "",
+            rec.spec.gpu_switching or ""]
+           + [i["status"] for i in ihv.evaluate(rec.spec)]
+           + ["；".join(f"{i['name']}：{i['note']}" for i in ihv.evaluate(rec.spec) if i["note"])]
+           for rec in db.all_panels() if rec.confidence.rank >= Confidence.C.rank])
+    ws6.auto_filter.ref = ws6.dimensions
     if ctx.get("mentions"):
         ws5 = wb.create_sheet("技術提及率")
         sheet(ws5, ["技術", "說明", f"{ctx.get('period_label', '本期')}款數", f"{ctx.get('period_label', '本期')}提及率", "前 30 天提及率"],

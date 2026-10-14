@@ -106,6 +106,11 @@ class PanelSpec(BaseModel):
     glass: Optional[str] = None
     screen_to_body_pct: Optional[float] = None
     form_factor: Optional[str] = Field(None, description="一般 / 可折疊 / 雙螢幕 / 翻轉")
+    # 平台（與 Intel / NVIDIA / AMD / Qualcomm 的搭配）
+    cpu_platform: Optional[str] = Field(None, description="處理器，例如 Intel Core Ultra 7 258V、AMD Ryzen AI 9 HX 370")
+    gpu: Optional[str] = Field(None, description="獨立顯示卡，例如 NVIDIA GeForce RTX 5070 Laptop；只有內顯就寫內顯型號或省略")
+    gpu_switching: Optional[str] = Field(None, description="顯示切換：MUX、Advanced Optimus、Optimus、AMD Smart Access Graphics 等")
+    platform_certifications: Optional[list[str]] = Field(None, description="Intel Evo、Copilot+ PC、NVIDIA Studio、AMD Advantage 等平台認證")
     # 依據：欄位名稱 → 文章原文片段（必須逐字出自文章）
     evidence: dict[str, str] = Field(default_factory=dict)
 

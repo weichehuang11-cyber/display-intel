@@ -102,8 +102,8 @@ def features(spec: PanelSpec) -> set[str]:
         out.add("高刷新 240Hz+")
     if spec.res_w and spec.res_w >= 2880:
         out.add("高解析 2.8K+")
-    lp = _low(spec.low_power_tech) + " " + _low(spec.vrr_range)
-    if any(k in lp for k in ("ltpo", "1hz", "1-", "動態刷新", "动态刷新", "vrr", "dynamic refresh")):
+    from .ihv import low_refresh
+    if low_refresh(spec):
         out.add("低刷新節能")
     care = _low(spec.dimming) + " " + _low(spec.eye_care)
     if "dc" in care or "flicker" in care or "無閃" in care or "无闪" in care or (spec.pwm_hz and spec.pwm_hz >= 1000):
@@ -287,6 +287,9 @@ GLOSSARY = {
     "VRR": "可變刷新率，畫面更新與顯示卡同步，減少撕裂；G-SYNC、FreeSync 都屬於此類。",
     "LTPO": "可在 1Hz 到 120Hz 間切換的背板技術，靜態畫面時省電。",
     "PPI": "每英吋像素數，越高越細緻。由解析度和尺寸計算。",
+    "MUX／Advanced Optimus": "讓獨立顯示卡直接輸出到螢幕，遊戲延遲較低、效能較好；一般 Optimus 則經過內顯轉送。",
+    "Intel Evo": "Intel 筆電認證，對螢幕、續航、喚醒速度等有最低要求。",
+    "Copilot+ PC": "Microsoft 的 AI PC 認證，需要具備一定效能的 NPU。",
     "G8.6 世代線": "第 8.6 代面板產線，玻璃基板較大，可更有效率地切割筆電尺寸 OLED。",
 }
 
@@ -296,5 +299,6 @@ def glossary_for(text: str) -> list[tuple[str, str]]:
     t = text.lower()
     keys = {"OLED": "oled", "Tandem OLED": "tandem", "Mini LED": "mini led", "IPS": "ips", "nits": "nits",
             "DCI-P3": "dci-p3", "sRGB": "srgb", "ΔE（Delta E）": "δe", "PWM 調光": "pwm", "DC 調光": "dc 調光",
-            "VRR": "sync", "LTPO": "ltpo", "PPI": "ppi", "G8.6 世代線": "8.6"}
+            "VRR": "sync", "LTPO": "ltpo", "PPI": "ppi", "G8.6 世代線": "8.6",
+            "MUX／Advanced Optimus": "獨顯直連", "Intel Evo": "evo", "Copilot+ PC": "copilot+"}
     return [(k, GLOSSARY[k]) for k, needle in keys.items() if needle in t]
