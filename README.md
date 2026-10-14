@@ -124,6 +124,15 @@ GitHub 會停用長期沒有活動的 repo 排程；本程式每天會把資料�
 
 ---
 
+## 建議加裝：Tavily 全文搜尋（免費，約 3 分鐘）
+
+Google 新聞大多只給標題和摘要，Tavily 可以抓到文章全文，解析度、刷新率、亮度、面板型號等細節會多很多。免費版每月 1,000 次，程式每天用約 20 次。
+
+1. 打開 <https://app.tavily.com>，用 Google 帳號登入
+2. 登入後首頁會顯示一組 `tvly-` 開頭的 API Key，點複製
+3. GitHub → Settings → Secrets → 新增 `TAVILY_API_KEY`，貼上金鑰
+4. 下次執行「1. 每日蒐集」就會自動使用
+
 ## 升級：AI 換成 Claude（品質最有感的升級，每月約 US$20–60）
 
 1. 到 <https://console.anthropic.com> 註冊，儲值後建立 API Key
@@ -131,7 +140,6 @@ GitHub 會停用長期沒有活動的 repo 排程；本程式每天會把資料�
 3. 編輯 `config.yaml`：把 `llm:` 底下「免費版」那幾行前面加 `#`，把「升級成 Claude」那幾行前面的 `#` 拿掉
 
 其他選配：
-- 搜尋 API：到 <https://tavily.com> 申請（有免費額度），Secrets 新增 `TAVILY_API_KEY`，可補抓全文
 
 ---
 

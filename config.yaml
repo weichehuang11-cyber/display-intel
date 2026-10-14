@@ -16,7 +16,7 @@ llm:
   extract_model: gemini-3.5-flash-lite
   summary_model: gemini-3.5-flash-lite
   fallback_models: [gemini-3.8-flash, gemini-3.1-flash-lite]  # 上面的模型不能用時依序嘗試
-  max_calls_per_run: 18             # 每次執行最多呼叫幾次 AI（免費版每日次數有限）
+  max_calls_per_run: 24             # 每次執行最多呼叫幾次 AI（免費版每日次數有限；額度用完會自動停止）
   min_seconds_between_calls: 15     # 每次呼叫間隔，避免超過每分鐘上限
   max_chars_per_call: 20000         # 每次送給 AI 的文字量（一次多送幾篇，省呼叫次數）
   max_chars_per_article: 3500
@@ -70,14 +70,32 @@ sources:
       ja: ["ノートPC 有機EL", "ノートPC 液晶"]
       ko: ["노트북 OLED", "IT OLED 8.6세대"]
 
-  # Tavily 搜尋 API（選用，需 TAVILY_API_KEY）
+  # Tavily 搜尋 API（選用，需 TAVILY_API_KEY）：可抓到文章全文，規格細節會多很多
+  # 免費版每月 1,000 次：每個查詢每天用 1 次，20 個查詢 × 30 天 = 600 次，留有餘裕
   tavily:
     max_results: 10
+    max_queries_per_run: 20
     queries:
-      - "new laptop OLED display specifications"
-      - "laptop display panel BOE AUO Samsung Display LG Display"
-      - "Intel NVIDIA AMD Qualcomm laptop display technology"
+      - "new laptop OLED display specs"
+      - "laptop display refresh rate nits announced"
+      - "laptop Mini LED display"
+      - "Tandem OLED laptop"
+      - "laptop review display panel measured"
+      - "all-in-one PC display announced"
+      - "ASUS Lenovo HP Dell laptop OLED screen"
+      - "Acer MSI Razer gaming laptop display 240Hz"
+      - "Samsung Display LG Display laptop OLED panel"
+      - "BOE AUO Innolux notebook panel"
       - "Gen 8.6 IT OLED production"
+      - "Intel laptop display technology"
+      - "NVIDIA G-SYNC laptop display"
+      - "AMD FreeSync laptop display"
+      - "Qualcomm Snapdragon laptop display"
+      - "筆電 OLED 螢幕 規格"
+      - "笔记本 屏幕 刷新率 面板"
+      - "ノートPC 有機EL ディスプレイ"
+      - "노트북 OLED 디스플레이"
+      - "laptop display leak rumor"
 
 # 文章初篩關鍵字（不分大小寫）。標題或摘要需「同時」命中兩組才會送進 AI，節省成本。
 keywords:

@@ -149,12 +149,12 @@ def _tavily(client, cfg: dict) -> list[RawArticle]:
     if not key or not tv.get("queries"):
         return []
     out = []
-    for q in tv["queries"]:
+    for q in tv["queries"][: tv.get("max_queries_per_run", 20)]:
         try:
             r = client.post("https://api.tavily.com/search",
                             headers={"Authorization": f"Bearer {key}"},
-                            json={"query": q, "topic": "news", "days": 1,
-                                  "max_results": tv.get("max_results", 10), "include_raw_content": True})
+                            json={"query": q, "topic": "news", "time_range": "day", "search_depth": "basic",
+                                  "max_results": tv.get("max_results", 10), "include_raw_content": "text"})
             r.raise_for_status()
             for item in r.json().get("results", []):
                 raw = item.get("raw_content") or ""

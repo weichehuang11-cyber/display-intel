@@ -268,3 +268,23 @@ def test_unidentifiable_panels_dropped():
     ex = Extraction(relevant=True, panels=[PanelSpec(brand="MSI", refresh_hz=240, evidence={"refresh_hz": "240Hz"})])
     ex, flags = postprocess(a, ex)
     assert ex.panels == [] and any("缺少品牌或機型" in f for f in flags)
+
+
+def test_tavily_request(monkeypatch):
+    import json as _json
+    import httpx
+    from display_intel.collect import _tavily
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-fake")
+    seen = []
+
+    def handler(req):
+        seen.append(_json.loads(req.content))
+        return httpx.Response(200, json={"results": [
+            {"url": "https://n.com/a?utm_source=x", "title": "Acme laptop OLED", "content": "snippet",
+             "raw_content": "Acme Foo 14 laptop has a 14-inch OLED display. " * 30}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    cfg = {"sources": {"tavily": {"queries": ["q1", "q2", "q3"], "max_queries_per_run": 2}}}
+    out = _tavily(client, cfg)
+    assert len(seen) == 2 and seen[0]["time_range"] == "day" and seen[0]["include_raw_content"] == "text"
+    assert out[0].content_level == "full" and out[0].url == "https://n.com/a"
