@@ -32,16 +32,18 @@ collection:
   enrich:                     # 只做規格補完（手動執行用，應付臨時需求）
     max_ai_calls: 40
     enrich_models: 25
-  # 補完規則
-  enrich_min_missing: 4       # 重點欄位缺 4 項以上才補查
-  enrich_max_attempts: 3      # 同一款最多補查 3 次
-  enrich_retry_days: 6        # 補查過的機型，6 天內不重複補查
-  enrich_within_days: 45      # 只補查 45 天內出現的機型
+  # 補完規則（目標：上市滿 30 天的機型規格完整度 75%）
+  enrich_target: 9                    # 12 項重點規格中已知 9 項（75%）就不再補查，把額度留給其他機型
+  enrich_schedule_days: [0, 14, 35]   # 補查時間：第一次立刻查，之後在上市第 14、35 天再查（配合評測出現）
+  enrich_retry_days: 6                # 兩次補查至少間隔幾天
+  enrich_within_days: 60              # 只補查 60 天內出現的機型
+  enrich_monthly_cap: 850             # Tavily 當月用到這個數字就暫停補查（保留餘裕給臨時需求）
+  tavily_monthly_hard_cap: 950        # 新聞搜尋也停止的上限（免費額度 1,000）
   # 展會月自動加碼：1 月 CES、5–6 月 Computex、9 月 IFA
   event_months: [1, 5, 6, 9]
   event_extra_queries_per_run: 10
-  # Tavily 每月 1,000 次預估：週一三五 10×3 + 週日 40 = 每週 70，補完每週約 33；
-  # 一般月份約 450，展會月約 620，保留 300 次以上給臨時手動執行
+  # Tavily 每月 1,000 次預估：新聞搜尋每週 70 次；補完每款 2 次（評測＋官方）＋面板反查
+  # 一般月份約 650–750 次；用到 850 次自動暫停補完，保留給臨時手動執行
 
 llm:
   # ===== 免費版（預設）=====

@@ -85,7 +85,9 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         _fmt(s.low_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),
         "觸控" if s.touch else "", s.surface or ""] if x)
     derived = "・".join(x for x in [f"{rec.ppi:g} PPI" if rec.ppi else "", rec.aspect_ratio or "",
-                                    f"像素密度{rec.density_class}" if rec.density_class else ""] if x)
+                                    f"像素密度{rec.density_class}" if rec.density_class else "",
+                                    ("面板原廠規格：" + "、".join(FIELD_LABELS.get(f, f) for f in rec.panel_spec_fields))
+                                    if rec.panel_spec_fields else ""] if x)
     change_text = "；".join(f"{FIELD_LABELS.get(k, k)}：{_fmt(o) or '—'} → {_fmt(n)}" for k, (o, n) in (changes or {}).items())
     known, total = analytics.completeness(rec)
     return {
@@ -121,6 +123,10 @@ def group_by_model(cards: list[dict]) -> list[dict]:
         head["sources"] = list({c["source_url"]: c for c in opts if c["source_url"]}.values())[:3]
         out.append(head)
     return sorted(out, key=lambda c: (c["brand"].lower(), c["model"].lower()))
+
+
+def ctx_label(weekly: bool) -> str:
+    return "本週" if weekly else "今日"
 
 
 def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dict:
@@ -200,8 +206,10 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
             avg = sum(c["score_pct"] for c in ctx["new_panels"]) / len(ctx["new_panels"])
             for k in ctx["kpis"]:
                 if k["label"] == "平均規格完整度":
-                    k["value"] = f"{avg:.0f}%"
-    ctx["kpis"].append({"label": "規格更新", "value": str(len(ctx["updates"]) + len(ctx["confirmed"])), "note": "款補到新規格"})
+                    k.update({"label": f"{ctx_label(weekly)}新機完整度", "value": f"{avg:.0f}%", "note": "剛發表，評測多半還沒出"})
+        mature, n_mature = analytics.mature_completeness(all_records, today)
+        ctx["kpis"].append({"label": "上市滿 30 天完整度", "value": f"{mature:.0%}" if mature is not None else "—",
+                            "note": f"{n_mature} 款｜目標 75%" if mature is not None else "資料累積中｜目標 75%"})
     ctx["ongoing"] = ongoing(db, cfg, ctx)
     ctx["weekly"] = weekly
     ctx["title"] = "筆電顯示器情報週報" if weekly else "筆電顯示器情報日報"

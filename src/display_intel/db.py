@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_reported ON events(reported_at);
 CREATE INDEX IF NOT EXISTS idx_events_dedup ON events(dedup_key);
+CREATE TABLE IF NOT EXISTS usage (
+    month TEXT, service TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (month, service)
+);
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, stage TEXT, started TEXT, finished TEXT, stats TEXT
 );
@@ -104,6 +107,23 @@ class DB:
     def mark_reported(self, ids: list[int]):
         now = utcnow().isoformat()
         self.conn.executemany("UPDATE events SET reported_at = ? WHERE id = ?", [(now, i) for i in ids])
+
+    # ---------- 外部服務月用量 ----------
+    @staticmethod
+    def _month() -> str:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m")
+
+    def add_usage(self, service: str, n: int = 1):
+        if n <= 0:
+            return
+        self.conn.execute("INSERT INTO usage (month, service, count) VALUES (?,?,?) "
+                          "ON CONFLICT(month, service) DO UPDATE SET count = count + excluded.count",
+                          (self._month(), service, n))
+
+    def usage(self, service: str) -> int:
+        row = self.conn.execute("SELECT count FROM usage WHERE month = ? AND service = ?", (self._month(), service)).fetchone()
+        return row[0] if row else 0
 
     # ---------- 執行紀錄 ----------
     def log_run(self, stage: str, started: datetime, stats: dict):

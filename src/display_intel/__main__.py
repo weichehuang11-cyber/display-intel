@@ -68,6 +68,12 @@ def cmd_collect(cfg: dict, args) -> int:
             return 1
 
         if run["collect_news"]:
+            # Tavily 月用量保護：快到免費上限時減少或停止新聞搜尋
+            hard_cap = (cfg.get("collection") or {}).get("tavily_monthly_hard_cap", 950)
+            remaining = max(0, hard_cap - db.usage("tavily"))
+            if len(run["tavily_queries"]) > remaining:
+                log.warning("Tavily 本月剩 %d 次，新聞搜尋從 %d 次減為 %d 次", remaining, len(run["tavily_queries"]), remaining)
+                run["tavily_queries"] = run["tavily_queries"][:remaining]
             src_errors: dict = {}
             articles, src_stats = collect(cfg, errors=src_errors)
             stats["sources"] = src_stats
@@ -84,6 +90,7 @@ def cmd_collect(cfg: dict, args) -> int:
             stats["ingest"] = verify.ingest(db, results)
             for a in processed:
                 db.add_article(a.url, a.title, a.source)
+            db.add_usage("tavily", run.get("tavily_used", 0))
 
         # 規格補完：用剩下的 AI 額度補查缺少規格的機型
         if run.get("enrich_models"):
@@ -94,6 +101,7 @@ def cmd_collect(cfg: dict, args) -> int:
                 log.exception("規格補完失敗（不影響已完成的蒐集）")
                 stats["enrich"] = {"error": f"{type(exc).__name__}：{exc}"}
         stats["llm_calls_total"] = llm.calls
+        stats["tavily_month_total"] = db.usage("tavily")
         log.info("完成：%s", stats.get("ingest", {}))
         return 0
     finally:

@@ -164,6 +164,7 @@ def _tavily(client, cfg: dict) -> list[RawArticle]:
         start = (datetime.now(timezone.utc) - timedelta(days=run["tavily_days"])).strftime("%Y-%m-%d")
         window = {"start_date": start}
     for q in queries:
+        run["tavily_used"] = run.get("tavily_used", 0) + 1
         try:
             r = client.post("https://api.tavily.com/search",
                             headers={"Authorization": f"Bearer {key}"},

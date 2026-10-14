@@ -394,7 +394,9 @@ def test_analytics_blocks():
 # ---------- 規格補完 ----------
 
 def test_completeness_and_candidates(db):
+    from datetime import timedelta
     from display_intel import analytics, enrich
+    from display_intel.db import utcnow
     sparse = _rec("s", 2, brand="HP", model="OmniBook 5", panel_tech="OLED")
     rich = _rec("r", 2, brand="ASUS", model="ProArt P16", panel_tech="OLED", size_inch=16, res_w=3840, res_h=2400,
                 refresh_hz=120, sdr_nits=500, dci_p3_pct=100, panel_maker="Samsung Display", panel_model="ATNA60",
@@ -404,14 +406,22 @@ def test_completeness_and_candidates(db):
     assert analytics.completeness(rich) == (12, 12) and analytics.completeness(sparse)[0] == 1
     for r in (sparse, rich, rumor, old):
         db.put_panel(r)
-    col = {"enrich_min_missing": 4, "enrich_within_days": 45}
-    assert [r.key for r in enrich.candidates(db, col)] == ["s"]
-    sparse.enrich_attempts, sparse.last_enriched = 1, sparse.first_seen
+    col = {"enrich_target": 9, "enrich_within_days": 60, "enrich_schedule_days": [0, 14, 35], "enrich_retry_days": 6}
+    assert [[r.key for r in g] for g in enrich.candidates(db, col)] == [["s"]]  # 已達標、傳聞、太舊都排除
+    # 第一次補查後，要等到上市第 14 天才會再查
+    sparse.enrich_attempts, sparse.last_enriched = 1, utcnow() - timedelta(days=7)
     db.put_panel(sparse)
-    from display_intel.db import utcnow
-    sparse.last_enriched = utcnow()
-    db.put_panel(sparse)
-    assert enrich.candidates(db, {**col, "enrich_retry_days": 6}) == []  # 剛補查過
+    assert enrich.candidates(db, col) == []
+    assert len(enrich.candidates(db, col, now=utcnow() + timedelta(days=13))) == 1
+
+
+def test_tavily_budget_cap(db):
+    from display_intel.enrich import TavilyBudget, _tavily
+    from display_intel.llm import BudgetExceeded
+    db.add_usage("tavily", 850)
+    with pytest.raises(BudgetExceeded):
+        _tavily(None, TavilyBudget(db, 850), "q")
+    assert db.usage("tavily") == 850
 
 
 def test_enrich_end_to_end(db, monkeypatch):
@@ -440,7 +450,8 @@ def test_enrich_end_to_end(db, monkeypatch):
     cfg = {"collection": {"enrich_min_missing": 4}, "llm": {"max_chars_per_call": 50000, "max_chars_per_article": 3000,
                                                             "max_chars_per_review": 8000}}
     stats = enr.enrich(db, cfg, FakeLLM([reply]), limit=5)
-    assert stats["searched"] == 1 and stats["pages"] == 1  # 沒提到 OmniBook 5 的頁面被過濾
+    assert stats["searched"] == 1 and stats["pages"] == 1  # 沒提到 OmniBook 5 的頁面被過濾、重複網址合併
+    assert stats["tavily"] == 2 and db.usage("tavily") == 2  # 評測＋官方各一次
     assert stats["improved"] == 1 and stats["fields_added"] >= 4
     recs = db.all_panels()
     assert len(recs) == 1 and recs[0].maker == "Samsung Display" and recs[0].confidence == Confidence.B
@@ -480,3 +491,39 @@ def test_identity_and_grouping(db, tmp_path):
     ctx, html, _, _ = build_report(db, cfg)
     assert len(ctx["new_panels"]) == 1 and len(ctx["new_panels"][0]["options"]) == 2
     assert "2 種螢幕選配" in html and ctx["kpis"][0]["value"] == "1"
+
+
+
+def test_panel_lookup_fills_blanks(db, monkeypatch):
+    import httpx
+    from display_intel import enrich as enr
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-fake")
+    rec = _rec("p", 1, brand="HP", model="OMEN 16", panel_model="NE160QDM-NY1", sdr_nits=500)
+    db.put_panel(rec)
+    page = "BOE NE160QDM-NY1 is a 16.0 inch IPS panel. Response time: 3 ms. Color gamut 100% sRGB. Brightness 400 nits."
+
+    def handler(req):
+        return httpx.Response(200, json={"results": [{"url": "https://panels.example/ne160", "title": "NE160QDM-NY1",
+                                                      "content": page, "raw_content": page}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    llm = FakeLLM([{"panel": {"panel_tech": "IPS", "response_ms": 3, "srgb_pct": 100, "sdr_nits": 400, "dci_p3_pct": 95,
+                              "evidence": {"panel_tech": "IPS panel", "response_ms": "Response time: 3 ms",
+                                           "srgb_pct": "100% sRGB", "sdr_nits": "400 nits", "dci_p3_pct": "95% DCI-P3"}}}])
+    values, url = enr.lookup_panel(client, llm, enr.TavilyBudget(db, 850), "NE160QDM-NY1")
+    assert values["response_ms"] == 3 and "dci_p3_pct" not in values  # 沒有原文依據的被刪掉
+    changes = enr.apply_panel_specs(db, rec, values, url)
+    r = db.get_panel("p")
+    assert r.spec.sdr_nits == 500  # 整機數值不被面板規格覆蓋
+    assert r.spec.response_ms == 3 and "response_ms" in r.panel_spec_fields and "sdr_nits" not in changes
+
+
+def test_mature_completeness():
+    from display_intel import analytics
+    from display_intel.db import utcnow
+    recs = [_rec("a", 40, brand="HP", model="A", panel_tech="OLED", refresh_hz=120, size_inch=14),
+            _rec("b", 40, brand="HP", model="A", panel_tech="OLED", refresh_hz=120, size_inch=14, sdr_nits=400),
+            _rec("c", 5, brand="HP", model="New", panel_tech="OLED")]
+    v, n = analytics.mature_completeness(recs, utcnow())
+    assert n == 1 and abs(v - 4 / 12) < 1e-9  # 同機型取最完整的選配；未滿 30 天的不算
+    assert analytics.mature_completeness(recs[2:], utcnow()) == (None, 0)

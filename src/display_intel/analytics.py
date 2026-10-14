@@ -53,6 +53,20 @@ def completeness(rec: PanelRecord) -> tuple[int, int]:
     return total - len(missing_fields(rec)), total
 
 
+def mature_completeness(records: list[PanelRecord], now: datetime, min_days: int = 30, max_days: int = 120) -> tuple[Optional[float], int]:
+    """上市滿 30 天（且 120 天內）機型的平均完整度，以每款資料最完整的選配計算。回傳（比例, 款數）。"""
+    from .verify import _norm, model_norm
+    best: dict = {}
+    for r in records:
+        age = now - r.first_seen
+        if r.confidence.rank >= Confidence.C.rank and timedelta(days=min_days) <= age <= timedelta(days=max_days):
+            k = (_norm(r.spec.brand), model_norm(r.spec))
+            best[k] = max(completeness(r)[0], best.get(k, 0))
+    if not best:
+        return None, 0
+    return sum(best.values()) / (len(best) * len(KEY_FIELDS)), len(best)
+
+
 def to_fill(records: list[PanelRecord], now: datetime, days: int = 45, top: int = 5) -> list[dict]:
     """待補清單：近期機型中，重點欄位缺最多的幾款。"""
     from .verify import _norm, model_norm

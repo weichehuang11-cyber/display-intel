@@ -168,6 +168,8 @@ class PanelRecord(BaseModel):
     # 規格補完紀錄
     enrich_attempts: int = 0
     last_enriched: Optional[datetime] = None
+    panel_lookup_done: bool = False
+    panel_spec_fields: list[str] = Field(default_factory=list)  # 來自面板原廠規格（非整機實測）的欄位
 
     @property
     def maker(self) -> Optional[str]:

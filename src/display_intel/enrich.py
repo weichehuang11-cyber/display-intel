@@ -1,10 +1,14 @@
-"""規格補完 agent：針對缺少重點規格的新機型，主動搜尋官方規格頁與評測再萃取一次。
+"""規格補完 agent：針對缺少重點規格的機型，主動搜尋官方規格文件與深度評測，再萃取一次。
 
-流程：
-1. 挑選近期、非傳聞、重點欄位缺 enrich_min_missing 項以上、近幾天沒補查過的機型
-2. 每款用 1 次 Tavily 搜尋「品牌 機型 display specs」，只保留真的提到這款機型的頁面
-3. AI 只萃取這款機型的螢幕規格（focus 模式），一樣經過原文比對
-4. 合併回資料庫；有新欄位就會在週報「規格更新」出現
+流程（以「機型」為單位，同一款的多種螢幕選配一起處理）：
+1. 挑選非傳聞、完整度未達目標（預設 9/12 = 75%）、到了回訪時間的機型
+   回訪時間：第一次立刻補查，之後在上市第 14、35 天再查（配合深度評測出現的時間）
+2. 每款搜尋 2 次：
+   - 深度評測（Notebookcheck 等）：面板型號、實測亮度、色域、ΔE、反應時間、PWM
+   - 官方規格文件（品牌官網、Lenovo PSREF、HP 規格表）：亮度、色域、表面處理、觸控
+3. 只保留真的提到這款機型的頁面；AI 只萃取這一款的規格（focus 模式），一樣逐字比對原文
+4. 已知面板型號時，再查一次面板原廠規格，補上空白欄位（標示「面板原廠規格」）
+5. Tavily 月用量達上限（預設 850）時自動停止，保留額度給臨時需求
 """
 
 from __future__ import annotations
@@ -16,26 +20,32 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from . import verify
+from . import derive, verify
 from .analytics import completeness, missing_fields
 from .collect import UA, canonical_url
 from .config import env
 from .db import DB, utcnow
 from .extract import extract_all
-from .llm import LLM
-from .schema import Confidence, PanelRecord, RawArticle
+from .llm import LLM, BudgetExceeded
+from .schema import Confidence, PanelRecord, PanelSpec, RawArticle
 
 log = logging.getLogger(__name__)
 
 # 品牌官方網域（來自這些網域的頁面視為官方，可信度 A）
 BRAND_DOMAINS = {
-    "asus": ["asus.com"], "lenovo": ["lenovo.com"], "hp": ["hp.com"], "dell": ["dell.com"],
+    "asus": ["asus.com"], "lenovo": ["lenovo.com", "psref.lenovo.com"], "hp": ["hp.com"], "dell": ["dell.com"],
     "alienware": ["dell.com", "alienware.com"], "acer": ["acer.com"], "msi": ["msi.com"],
     "apple": ["apple.com"], "samsung": ["samsung.com"], "microsoft": ["microsoft.com"],
     "razer": ["razer.com"], "lg": ["lg.com"], "gigabyte": ["gigabyte.com"], "framework": ["frame.work"],
-    "huawei": ["huawei.com", "consumer.huawei.com"], "xiaomi": ["mi.com", "xiaomi.com"],
+    "huawei": ["huawei.com", "consumer.huawei.com"], "xiaomi": ["mi.com", "xiaomi.com"], "honor": ["honor.com"],
 }
+# 深度評測網站（常列出面板型號與實測數據）
+REVIEW_DOMAINS = ["notebookcheck.net", "notebookcheck.org", "notebookcheck.com", "laptopmedia.com",
+                  "ultrabookreview.com", "rtings.com", "tomshardware.com", "pcmag.com"]
 REVIEW_HINTS = ("notebookcheck", "review", "rtings", "laptopmedia", "tomshardware", "pcmag", "評測", "评测", "レビュー")
+# 面板原廠規格可以補的欄位（只填空白，不覆蓋整機資料）
+PANEL_SPEC_FIELDS = ["panel_maker", "panel_tech", "sdr_nits", "hdr_peak_nits", "contrast", "srgb_pct", "dci_p3_pct",
+                     "adobe_rgb_pct", "color_depth_bit", "response_ms", "surface"]
 
 
 def source_type_for(url: str, title: str, brand: str | None) -> str:
@@ -49,104 +59,230 @@ def source_type_for(url: str, title: str, brand: str | None) -> str:
     return "media"
 
 
-def candidates(db: DB, col: dict, now=None) -> list[PanelRecord]:
+# ---------- 挑選要補查的機型 ----------
+
+def model_groups(records: list[PanelRecord]) -> list[list[PanelRecord]]:
+    groups: dict[tuple, list[PanelRecord]] = {}
+    for r in records:
+        groups.setdefault((verify._norm(r.spec.brand), verify.model_norm(r.spec)), []).append(r)
+    return list(groups.values())
+
+
+def group_score(group: list[PanelRecord]) -> int:
+    return max(completeness(r)[0] for r in group)
+
+
+def candidates(db: DB, col: dict, now=None) -> list[list[PanelRecord]]:
+    """回傳要補查的機型（每款是一組螢幕選配紀錄）。"""
     now = now or utcnow()
-    within = timedelta(days=col.get("enrich_within_days", 45))
-    retry = timedelta(days=col.get("enrich_retry_days", 6))
+    schedule = col.get("enrich_schedule_days", [0, 14, 35])
+    target = col.get("enrich_target", 9)
+    within = timedelta(days=col.get("enrich_within_days", 60))
+    spacing = timedelta(days=col.get("enrich_retry_days", 6))
     out = []
-    for r in db.all_panels():
-        if r.confidence.rank < Confidence.C.rank:  # 傳聞通常查不到規格頁
+    for g in model_groups([r for r in db.all_panels() if r.confidence.rank >= Confidence.C.rank]):
+        first = min(r.first_seen for r in g)
+        attempts = max(r.enrich_attempts for r in g)
+        last = max((r.last_enriched for r in g if r.last_enriched), default=None)
+        if first < now - within or attempts >= len(schedule):
             continue
-        if r.first_seen < now - within:
+        if group_score(g) >= target:  # 已達目標，把額度留給其他機型
             continue
-        if r.enrich_attempts >= col.get("enrich_max_attempts", 3):
+        if now - first < timedelta(days=schedule[attempts]):  # 還沒到回訪時間
             continue
-        if r.last_enriched and r.last_enriched > now - retry:
+        if last and now - last < spacing:
             continue
-        if len(missing_fields(r)) < col.get("enrich_min_missing", 4):
-            continue
-        out.append(r)
-    out.sort(key=lambda r: (-len(missing_fields(r)), -r.first_seen.timestamp()))
+        out.append(g)
+    out.sort(key=lambda g: (group_score(g), -max(r.first_seen for r in g).timestamp()))
     return out
 
 
-def search_specs(client: httpx.Client, rec: PanelRecord, max_results: int = 6) -> list[RawArticle]:
-    """搜尋這款機型的規格頁與評測，只保留內文真的提到這款機型的結果。"""
-    key = env("TAVILY_API_KEY")
-    if not key:
-        return []
-    name = f"{rec.spec.brand} {rec.spec.model}".strip()
-    r = client.post("https://api.tavily.com/search", headers={"Authorization": f"Bearer {key}"},
-                    json={"query": f"{name} display panel specs review", "topic": "general",
-                          "search_depth": "basic", "max_results": max_results, "include_raw_content": "text"})
-    r.raise_for_status()
-    target = verify.model_norm(rec.spec)
-    out = []
-    for item in r.json().get("results", []):
-        raw = item.get("raw_content") or ""
-        text = f"{item.get('title', '')} {item.get('content', '')} {raw[:20000]}"
-        if not target or target not in verify._norm(text):
-            continue
-        out.append(RawArticle(
-            url=canonical_url(item["url"]), title=item.get("title", ""), source=urlsplit(item["url"]).netloc,
-            source_type=source_type_for(item["url"], item.get("title", ""), rec.spec.brand), lang="en",
-            summary=item.get("content", "")[:2000], content=raw, content_level="full" if len(raw) > 800 else "snippet"))
-    # 官方與評測優先
-    out.sort(key=lambda a: {"official": 0, "review": 1}.get(a.source_type, 2))
-    return out[:3]
+# ---------- 搜尋 ----------
 
+class TavilyBudget:
+    """Tavily 月用量保護：補完只能用到 monthly_cap，超過就停。"""
+
+    def __init__(self, db: DB, monthly_cap: int):
+        self.db, self.cap = db, monthly_cap
+
+    def ok(self) -> bool:
+        return self.db.usage("tavily") < self.cap
+
+    def spend(self, n: int = 1):
+        self.db.add_usage("tavily", n)
+
+
+def _tavily(client: httpx.Client, budget: TavilyBudget, query: str, max_results: int = 5,
+            include_domains: list[str] | None = None) -> list[dict]:
+    if not budget.ok():
+        raise BudgetExceeded("Tavily 本月補完額度已達上限")
+    body = {"query": query, "topic": "general", "search_depth": "basic",
+            "max_results": max_results, "include_raw_content": "text"}
+    if include_domains:
+        body["include_domains"] = include_domains
+    budget.spend()
+    r = client.post("https://api.tavily.com/search", headers={"Authorization": f"Bearer {env('TAVILY_API_KEY')}"}, json=body)
+    r.raise_for_status()
+    return r.json().get("results", [])
+
+
+def search_specs(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -> list[RawArticle]:
+    """深度評測＋官方規格各搜尋一次，只保留內文真的提到這款機型的頁面。"""
+    name = f"{rec.spec.brand} {rec.spec.model}".strip()
+    brand_key = (rec.spec.brand or "").lower().split()[0] if rec.spec.brand else ""
+    searches = [(f"{name} review display panel", REVIEW_DOMAINS)]
+    official = BRAND_DOMAINS.get(brand_key)
+    searches.append((f"{name} specifications display", official) if official else (f"{name} specifications display nits", None))
+    target = verify.model_norm(rec.spec)
+    out, seen = [], set()
+    for query, domains in searches:
+        try:
+            items = _tavily(client, budget, query, 5, domains)
+        except BudgetExceeded:
+            raise
+        except Exception as exc:
+            log.warning("補完搜尋失敗 %s：%s", query, exc)
+            continue
+        for item in items:
+            raw = item.get("raw_content") or ""
+            text = f"{item.get('title', '')} {item.get('content', '')} {raw[:30000]}"
+            url = canonical_url(item["url"])
+            if url in seen or not target or target not in verify._norm(text):
+                continue
+            seen.add(url)
+            out.append(RawArticle(
+                url=url, title=item.get("title", ""), source=urlsplit(item["url"]).netloc,
+                source_type=source_type_for(item["url"], item.get("title", ""), rec.spec.brand), lang="en",
+                summary=item.get("content", "")[:2000], content=raw, content_level="full" if len(raw) > 800 else "snippet"))
+    out.sort(key=lambda a: {"official": 0, "review": 1}.get(a.source_type, 2))
+    return out[:4]
+
+
+# ---------- 面板型號反查 ----------
+
+PANEL_PROMPT = """你是顯示器面板規格分析師。從文章中找出面板「{model}」的原廠規格，只輸出 JSON：
+{{"panel": {{"panel_maker": "", "panel_tech": "", "sdr_nits": 數字, "hdr_peak_nits": 數字, "contrast": "",
+"srgb_pct": 數字, "dci_p3_pct": 數字, "adobe_rgb_pct": 數字, "color_depth_bit": 數字, "response_ms": 數字,
+"surface": "", "evidence": {{"欄位名": "逐字複製自文章的片段"}}}}}}
+規則：只寫文章中屬於這片面板的數值，沒有就省略；每個欄位都要附 evidence；找不到這片面板就回傳 {{"panel": null}}。"""
+
+
+def lookup_panel(client: httpx.Client, llm: LLM, budget: TavilyBudget, panel_model: str) -> tuple[dict, str]:
+    """查面板原廠規格。回傳（欄位 → 值, 來源網址）。"""
+    items = _tavily(client, budget, f"{panel_model} panel specifications", 4)
+    key = verify._norm(panel_model)
+    for item in items:
+        raw = item.get("raw_content") or item.get("content") or ""
+        if key not in verify._norm(raw):
+            continue
+        text = raw[:8000]
+        data = llm.complete_json(PANEL_PROMPT.format(model=panel_model), text)
+        panel = data.get("panel") if isinstance(data, dict) else None
+        if not panel:
+            continue
+        fields = {k: v for k, v in panel.items() if k in PANEL_SPEC_FIELDS or k == "evidence"}
+        try:
+            spec = PanelSpec(**fields)
+        except Exception:
+            continue
+        spec, _ = derive.clean_spec(spec, text)
+        values = {f: getattr(spec, f) for f in PANEL_SPEC_FIELDS if getattr(spec, f) not in (None, "", [])}
+        if values:
+            return values, canonical_url(item["url"])
+    return {}, ""
+
+
+def apply_panel_specs(db: DB, rec: PanelRecord, values: dict, url: str) -> dict:
+    """面板原廠規格只填空白欄位，並記錄是哪些欄位。回傳變更。"""
+    from .panel_decode import canonical_maker
+    data = rec.spec.model_dump()
+    changes = {}
+    for f, v in values.items():
+        if data.get(f) in (None, "", []):
+            data[f] = canonical_maker(v) if f == "panel_maker" else v
+            changes[f] = [None, data[f]]
+    if changes:
+        rec.spec = PanelSpec(**data)
+        rec.panel_spec_fields = sorted(set(rec.panel_spec_fields) | set(changes))
+        note = f"部分規格來自面板 {rec.spec.panel_model} 原廠規格（{url}）"
+        if note not in rec.flags:
+            rec.flags.append(note)
+        rec.last_updated = utcnow()
+        db.put_panel(verify._derived(rec))
+    return changes
+
+
+# ---------- 主流程 ----------
 
 def enrich(db: DB, cfg: dict, llm: LLM, limit: int, should_stop: Callable[[], bool] = lambda: False) -> dict:
     """補完最多 limit 款機型。回傳統計。"""
     col = cfg.get("collection") or {}
-    stats = {"candidates": 0, "searched": 0, "pages": 0, "improved": 0, "fields_added": 0, "stopped": "", "details": []}
+    stats = {"candidates": 0, "searched": 0, "tavily": 0, "pages": 0, "improved": 0, "fields_added": 0,
+             "panel_lookups": 0, "stopped": "", "details": []}
     if limit <= 0 or not env("TAVILY_API_KEY"):
         stats["stopped"] = "未設定 TAVILY_API_KEY 或補完數量為 0"
         return stats
+    budget = TavilyBudget(db, col.get("enrich_monthly_cap", 850))
+    used_before = db.usage("tavily")
     todo = candidates(db, col)
     stats["candidates"] = len(todo)
     seen = db.seen_urls()
-    with httpx.Client(timeout=httpx.Timeout(30.0), headers={"User-Agent": UA}) as client:
-        for rec in todo[:limit]:
-            if should_stop():
-                stats["stopped"] = "已到收工時間"
-                break
-            before = completeness(rec)[0]
-            name = f"{rec.spec.brand} {rec.spec.model}"
-            rec.enrich_attempts += 1
-            rec.last_enriched = utcnow()
-            db.put_panel(rec)
-            try:
-                pages = [p for p in search_specs(client, rec) if p.url not in seen]
-            except Exception as exc:
-                log.warning("補完搜尋失敗 %s：%s", name, exc)
-                continue
-            stats["searched"] += 1
-            stats["pages"] += len(pages)
-            if not pages:
-                continue
-            results, ex_stats = extract_all(pages, llm, cfg["llm"], should_stop, focus=name)
-            target = verify.model_norm(rec.spec)
-            kept = []
-            for article, ex, flags in results:
-                ex.panels = [p for p in ex.panels if verify._norm(p.brand) == verify._norm(rec.spec.brand)
-                             and verify.model_norm(p) == target]
-                ex.platform_techs, ex.fabs, ex.industry_note = [], [], None
-                if ex.panels:
-                    kept.append((article, ex, flags))
-            verify.ingest(db, kept)
-            for p in ex_stats.get("processed", []):
-                db.add_article(p.url, p.title, p.source)
-                seen.add(p.url)
-            after_rec = verify.find_existing(db, rec.spec) or rec
-            gained = completeness(after_rec)[0] - before
-            if gained > 0:
-                stats["improved"] += 1
-                stats["fields_added"] += gained
-                stats["details"].append(f"{name}：{before} → {before + gained} 項")
-            if ex_stats.get("stopped"):  # AI 額度用完或到收工時間
-                stats["stopped"] = ex_stats["stopped"]
-                break
-    log.info("規格補完：候選 %d 款，搜尋 %d 款，%d 款補到新規格，共新增 %d 項",
-             stats["candidates"], stats["searched"], stats["improved"], stats["fields_added"])
+    with httpx.Client(timeout=httpx.Timeout(40.0), headers={"User-Agent": UA}) as client:
+        try:
+            for group in todo[:limit]:
+                if should_stop():
+                    stats["stopped"] = "已到收工時間"
+                    break
+                rep = max(group, key=lambda r: completeness(r)[0])
+                before = group_score(group)
+                name = f"{rep.spec.brand} {rep.spec.model}"
+                for r in group:
+                    r.enrich_attempts += 1
+                    r.last_enriched = utcnow()
+                    db.put_panel(r)
+                pages = [p for p in search_specs(client, rep, budget) if p.url not in seen]
+                stats["searched"] += 1
+                stats["pages"] += len(pages)
+                if pages:
+                    results, ex_stats = extract_all(pages, llm, cfg["llm"], should_stop, focus=name)
+                    target = verify.model_norm(rep.spec)
+                    kept = []
+                    for article, ex, flags in results:
+                        ex.panels = [p for p in ex.panels if verify._norm(p.brand) == verify._norm(rep.spec.brand)
+                                     and verify.model_norm(p) == target]
+                        ex.platform_techs, ex.fabs, ex.industry_note = [], [], None
+                        if ex.panels:
+                            kept.append((article, ex, flags))
+                    verify.ingest(db, kept)
+                    for p in ex_stats.get("processed", []):
+                        db.add_article(p.url, p.title, p.source)
+                        seen.add(p.url)
+                    if ex_stats.get("stopped"):
+                        stats["stopped"] = ex_stats["stopped"]
+                        break
+                # 面板型號反查（同一款只查一次）
+                current = [r for r in db.all_panels()
+                           if verify._norm(r.spec.brand) == verify._norm(rep.spec.brand) and verify.model_norm(r.spec) == verify.model_norm(rep.spec)]
+                for r in current:
+                    if r.spec.panel_model and not r.panel_lookup_done and len(missing_fields(r)) > 0:
+                        r.panel_lookup_done = True
+                        db.put_panel(r)
+                        values, url = lookup_panel(client, llm, budget, r.spec.panel_model)
+                        stats["panel_lookups"] += 1
+                        changes = apply_panel_specs(db, r, values, url) if values else {}
+                        if changes:
+                            db.add_event("panel", "updated", {"record": r.model_dump(mode="json"), "changes": changes},
+                                         r.confidence.value, url, urlsplit(url).netloc if url else "面板規格")
+                after = group_score(current) if current else before
+                if after > before:
+                    stats["improved"] += 1
+                    stats["fields_added"] += after - before
+                    stats["details"].append(f"{name}：{before} → {after} 項")
+        except BudgetExceeded as exc:
+            stats["stopped"] = str(exc)
+            log.warning("停止補完：%s", exc)
+    stats["tavily"] = db.usage("tavily") - used_before
+    stats["tavily_month_total"] = db.usage("tavily")
+    log.info("規格補完：候選 %d 款，搜尋 %d 款（Tavily %d 次），%d 款補到新規格，共新增 %d 項；面板反查 %d 次",
+             stats["candidates"], stats["searched"], stats["tavily"], stats["improved"], stats["fields_added"], stats["panel_lookups"])
     return stats
