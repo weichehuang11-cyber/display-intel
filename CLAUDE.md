@@ -4,7 +4,7 @@
 
 ## 專案目的
 
-每日自動蒐集全球 Notebook／Laptop／AIO 顯示螢幕規格（LCD、OLED）、平台廠顯示技術、面板廠技術能力與世代線，台灣時間 09:30 寄出報告。主要用途：市場情報與技術規格收集。
+定期自動蒐集全球 Notebook／Laptop／AIO 顯示螢幕規格（LCD、OLED）、平台廠顯示技術、面板廠技術能力與世代線並寄出報告。目前為**週報**：每週日台灣時間 22:00 寄出（`config.yaml` 的 `schedule.cadence` 可切換 weekly / daily）。主要用途：市場情報與技術規格收集。
 
 使用者沒有程式背景：**所有說明、log、報告、錯誤訊息都用繁體中文**；設定集中在 `config.yaml`，讓非工程人員能在 GitHub 網頁上修改。
 
@@ -23,15 +23,15 @@ __main__.py 總控：collect / report / run / check-sources / test-email / demo
 demo.py     虛構範例資料，不需金鑰即可產生報告
 ```
 
-排程（`.github/workflows/`）：`collect.yml` 06:17 台灣時間；`report.yml` 08:47 啟動、等到 09:30 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
+排程（`.github/workflows/`）：`collect.yml` 週日 19:17 台灣時間（回看 7 天）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
 
 ## 核心規則（修改時務必維持）
 
 1. **防幻覺**：每個規格欄位都必須有逐字出自文章的 evidence，否則 `derive.enforce_evidence` 會刪除。不要放寬這條規則。
 2. **衍生規格由程式計算**，不從文章抄。
-3. **可信度**：A 官方、B 實測、C 媒體／彙整、D 傳聞、E 待確認（不進日報）。低可信度來源不能覆蓋高可信度數值；D 被 C 以上證實時產生 `rumor_confirmed` 事件。
+3. **可信度**：A 官方、B 實測、C 媒體／彙整、D 傳聞、E 待確認（不進報告）。低可信度來源不能覆蓋高可信度數值；D 被 C 以上證實時產生 `rumor_confirmed` 事件。
 4. **單一來源或單批失敗不中斷流程**；額度用完（`BudgetExceeded`）時停止萃取，用已完成的部分出報告。
-5. **09:30 一定要寄出**：報告失敗時寄失敗通知給 SMTP_USER。
+5. **排定時間一定要寄出**：報告失敗時寄失敗通知給 SMTP_USER。
 6. 事件寄出成功後才 `mark_reported`；dry-run 不標記。
 
 ## 開發

@@ -85,6 +85,10 @@ def _entry_time(entry) -> datetime | None:
     return None
 
 
+def is_weekly(cfg: dict) -> bool:
+    return (cfg.get("schedule") or {}).get("cadence", "daily") == "weekly"
+
+
 # ---------- 初篩 ----------
 
 def classify(article: RawArticle, keywords: dict) -> list[str]:
@@ -134,10 +138,11 @@ def _rss_source(client, src: dict, since: datetime) -> list[RawArticle]:
 
 def google_news_urls(cfg: dict) -> list[dict]:
     gn = cfg["sources"].get("google_news") or {}
+    window = "7d" if is_weekly(cfg) else "1d"
     srcs = []
     for loc in gn.get("locales", []):
         for q in gn.get("queries", {}).get(loc["lang"], []):
-            url = (f"https://news.google.com/rss/search?q={quote_plus(q + ' when:1d')}"
+            url = (f"https://news.google.com/rss/search?q={quote_plus(q + ' when:' + window)}"
                    f"&hl={loc['hl']}&gl={loc['gl']}&ceid={loc['ceid']}")
             srcs.append({"name": f"Google 新聞（{loc['lang']}）", "url": url, "type": "aggregator", "lang": loc["lang"]})
     return srcs
@@ -153,7 +158,7 @@ def _tavily(client, cfg: dict) -> list[RawArticle]:
         try:
             r = client.post("https://api.tavily.com/search",
                             headers={"Authorization": f"Bearer {key}"},
-                            json={"query": q, "topic": "news", "time_range": "day", "search_depth": "basic",
+                            json={"query": q, "topic": "news", "time_range": "week" if is_weekly(cfg) else "day", "search_depth": "basic",
                                   "max_results": tv.get("max_results", 10), "include_raw_content": "text"})
             r.raise_for_status()
             for item in r.json().get("results", []):

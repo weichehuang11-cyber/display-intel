@@ -288,3 +288,15 @@ def test_tavily_request(monkeypatch):
     out = _tavily(client, cfg)
     assert len(seen) == 2 and seen[0]["time_range"] == "day" and seen[0]["include_raw_content"] == "text"
     assert out[0].content_level == "full" and out[0].url == "https://n.com/a"
+
+
+def test_weekly_cadence(db, tmp_path):
+    from display_intel.collect import google_news_urls
+    from display_intel.report import build_report
+    cfg = {"schedule": {"cadence": "weekly", "timezone": "Asia/Taipei"},
+           "sources": {"google_news": {"locales": [{"hl": "en-US", "gl": "US", "ceid": "US:en", "lang": "en"}],
+                                       "queries": {"en": ["laptop OLED"]}}},
+           "report": {"output_dir": str(tmp_path), "subject_prefix": "[週報]"}}
+    assert "when%3A7d" in google_news_urls(cfg)[0]["url"]
+    ctx, html, xlsx, ids = build_report(db, cfg)
+    assert ctx["title"] == "筆電顯示器情報週報" and "過去 7 天" in html and "本週重點" in html

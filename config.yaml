@@ -3,10 +3,13 @@
 # 修改後先執行 `python -m display_intel check-sources` 確認來源可以連線。
 
 schedule:
+  # cadence：weekly = 每週一次（週報）；daily = 每天一次（日報）
+  # 改頻率時，也要同步改 .github/workflows/ 兩個檔案裡的 cron 時間（教學有說明）
+  cadence: weekly
   timezone: Asia/Taipei
-  send_at: "09:30"          # 準時寄出的時間
-  collect_deadline: "08:35" # 蒐集與萃取最晚到這個時間就收工，把資料交給報告階段
-  lookback_hours: 26        # 抓多久以內的文章（略大於 24 小時，避免時區落差漏抓）
+  send_at: "22:00"          # 寄出時間（週報：每週日 22:00）
+  collect_deadline: "21:35" # 蒐集與萃取最晚到這個時間收工，把資料交給報告階段
+  lookback_hours: 170       # 抓多久以內的文章（週報約 7 天；日報改成 26）
 
 llm:
   # ===== 免費版（預設）=====
@@ -16,7 +19,7 @@ llm:
   extract_model: gemini-3.5-flash-lite
   summary_model: gemini-3.5-flash-lite
   fallback_models: [gemini-3.8-flash, gemini-3.1-flash-lite]  # 上面的模型不能用時依序嘗試
-  max_calls_per_run: 24             # 每次執行最多呼叫幾次 AI（免費版每日次數有限；額度用完會自動停止）
+  max_calls_per_run: 60             # 每次執行最多呼叫幾次 AI（週報一次處理一整週；額度用完會自動停止）
   min_seconds_between_calls: 15     # 每次呼叫間隔，避免超過每分鐘上限
   max_chars_per_call: 20000         # 每次送給 AI 的文字量（一次多送幾篇，省呼叫次數）
   max_chars_per_article: 3500
@@ -71,9 +74,9 @@ sources:
       ko: ["노트북 OLED", "IT OLED 8.6세대"]
 
   # Tavily 搜尋 API（選用，需 TAVILY_API_KEY）：可抓到文章全文，規格細節會多很多
-  # 免費版每月 1,000 次：每個查詢每天用 1 次，20 個查詢 × 30 天 = 600 次，留有餘裕
+  # 免費版每月 1,000 次：週報每週 20 次查詢，一個月約 90 次，額度很充裕
   tavily:
-    max_results: 10
+    max_results: 20
     max_queries_per_run: 20
     queries:
       - "new laptop OLED display specs"
@@ -106,7 +109,7 @@ keywords:
   fab: [fab, "gen 8.6", "8.6-gen", "8.6세대", "8.6代", "g8.6", "generation", capacity, 產線, 产线, 世代線, 代线, 量產, 量产]
 
 report:
-  subject_prefix: "[顯示器情報]"
+  subject_prefix: "[顯示器情報週報]"
   ongoing_days: 30          # 「持續討論中」回看天數
   output_dir: output
   database: data/intel.sqlite

@@ -1,6 +1,6 @@
 # Display Intel：筆電顯示器情報 Agent
 
-每天自動蒐集全球 Notebook、Laptop、AIO 的螢幕規格（LCD／OLED）、平台廠（Intel、NVIDIA、AMD、Qualcomm）顯示技術、面板廠世代線動態，台灣時間 **09:30** 把整理好的報告寄到你的信箱，附完整 Excel 規格表。
+每週自動蒐集全球 Notebook、Laptop、AIO 的螢幕規格（LCD／OLED）、平台廠（Intel、NVIDIA、AMD、Qualcomm）顯示技術、面板廠世代線動態，每週日台灣時間 **22:00** 把整理好的週報寄到你的信箱，附完整 Excel 規格表。（也可改回每天寄日報，見「日常調整」）
 
 - 全部在 GitHub 雲端執行，**你的電腦不用開機**
 - 預設**完全免費**：GitHub Actions＋Google Gemini 免費 AI＋Gmail
@@ -48,13 +48,13 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 
 1. 點 repo 上方的 **Actions** 分頁
 2. 如果看到「Workflows aren't being run on this repository」或綠色按鈕「**I understand my workflows, go ahead and enable them**」，點它
-3. 左側應該看到三個項目：`1. 每日蒐集`、`2. 每日報告`、`測試`
+3. 左側應該看到三個項目：`1. 每週蒐集`、`2. 每週報告`、`測試`
 
 ### 步驟 4：第一次手動測試
 
 **4-1 測試寄信與報告格式（不寄信，約 2 分鐘）**
 
-1. Actions → 左側點 **2. 每日報告** → 右側點 **Run workflow** → mode 選 `test` → 按綠色 **Run workflow**
+1. Actions → 左側點 **2. 每週報告** → 右側點 **Run workflow** → mode 選 `test` → 按綠色 **Run workflow**
 2. 等約 1–2 分鐘，列表出現綠色勾勾 ✓ 代表成功
 3. 點進那一次執行 → 頁面最下方 **Artifacts** → 下載 `report-...`，解壓縮後用瀏覽器打開 `report-日期.html`
 
@@ -62,24 +62,24 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 
 **4-2 跑一次真正的蒐集（約 20–40 分鐘）**
 
-1. Actions → **1. 每日蒐集** → **Run workflow** → **Run workflow**
+1. Actions → **1. 每週蒐集** → **Run workflow** → **Run workflow**
 2. 執行中是黃色圓圈，可以關掉網頁，晚點再回來看
 3. 完成後點進去 → 點 `collect` → 展開「蒐集、萃取、查核」，最後幾行會顯示抓到幾篇文章、新增幾筆規格
 
 **4-3 立刻寄一封真的報告**
 
-1. Actions → **2. 每日報告** → **Run workflow** → mode 選 `now` → **Run workflow**
+1. Actions → **2. 每週報告** → **Run workflow** → mode 選 `now` → **Run workflow**
 2. 幾分鐘後檢查信箱（第一次可能在「垃圾郵件」，請標示為「非垃圾郵件」）
 
 ### 步驟 5：完成！
 
-之後每天會自動執行，不用再做任何事：
+之後每週日會自動執行，不用再做任何事：
 
 | 台灣時間 | 動作 |
 | --- | --- |
-| 06:17 | 開始蒐集全球新聞、AI 萃取規格（最晚 08:35 收工） |
-| 08:47 | 產生報告，等待到 09:30 |
-| 09:30 | 寄出報告 |
+| 週日 19:17 | 蒐集過去 7 天的全球新聞、AI 萃取規格（最晚 21:35 收工） |
+| 週日 21:17 | 產生週報，等待到 22:00 |
+| 週日 22:00 | 寄出週報 |
 
 > GitHub 的免費排程在尖峰時段偶爾會延遲 10–30 分鐘，所以報告階段提早啟動預留緩衝。
 
@@ -95,9 +95,10 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 | 新增搜尋關鍵字 | `google_news:` → `queries:` |
 | 讓更多文章被收進來 | `keywords:` 底下加詞 |
 | 改寄送時間 | `schedule:` → `send_at`（也要同步改 `.github/workflows/report.yml` 的 cron） |
+| 改回每天寄日報 | `schedule:` 的 `cadence` 改成 `daily`、`send_at` 改成 `"09:30"`、`collect_deadline` 改成 `"08:35"`、`lookback_hours` 改成 `26`；兩個 workflow 檔案開頭的註解寫了要換成的 cron |
 | 改信件標題 | `report:` → `subject_prefix` |
 
-改來源後建議手動跑一次「1. 每日蒐集」，看紀錄裡「來源統計」有沒有某個來源一直是 0 篇（代表網址失效）。
+改來源後建議手動跑一次「1. 每週蒐集」，看紀錄裡「來源統計」有沒有某個來源一直是 0 篇（代表網址失效）。
 
 ---
 
@@ -110,28 +111,28 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 - `429` 或「免費額度已用完」→ 當天免費次數用完，隔天自動恢復；常發生就把 `max_calls_per_run` 調小
 - `404` 或 model not found → 免費模型名稱改了：到 <https://ai.google.dev/gemini-api/docs/models> 找一個 Flash 或 Flash-Lite 模型，把 `config.yaml` 的 `extract_model` 和 `summary_model` 換成新名稱
 
-**Q：每天都會收到信嗎？沒有新消息也會寄？**
+**Q：每週都會收到信嗎？沒有新消息也會寄？**
 會。沒有新消息時，報告會列出「持續討論中」的近期主題。若某天完全失敗，會寄一封「執行失敗通知」到寄件信箱。
 
 **Q：repo 要設公開（Public）還是私人（Private）？**
 建議 **Public**：公開 repo 的 Actions 執行時間不限，完全免費。程式和新聞資料本來就是公開資訊，金鑰存在 Secrets 不會外洩。Private 每月只有 2,000 分鐘，可能不夠用。
 
 **Q：60 天沒動 repo，排程會停嗎？**
-GitHub 會停用長期沒有活動的 repo 排程；本程式每天會把資料庫存回 repo，算是有活動。如果收到 GitHub 的停用通知信，到 Actions 頁面按「Enable workflow」即可。
+GitHub 會停用長期沒有活動的 repo 排程；本程式每週會把資料庫存回 repo，算是有活動。如果收到 GitHub 的停用通知信，到 Actions 頁面按「Enable workflow」即可。
 
 **Q：免費版能做到多完整？**
-大約是付費完整版的五到六成：每天約處理 80–120 篇文章，Google 新聞多數只有摘要，社群只有 Reddit。官方新聞、主要評測網、面板廠大新聞都能涵蓋。
+大約是付費完整版的五到六成：AI 免費額度有限，新聞量大的週可能處理不完，Google 新聞多數只有摘要，社群只有 Reddit。官方新聞、主要評測網、面板廠大新聞都能涵蓋。
 
 ---
 
 ## 建議加裝：Tavily 全文搜尋（免費，約 3 分鐘）
 
-Google 新聞大多只給標題和摘要，Tavily 可以抓到文章全文，解析度、刷新率、亮度、面板型號等細節會多很多。免費版每月 1,000 次，程式每天用約 20 次。
+Google 新聞大多只給標題和摘要，Tavily 可以抓到文章全文，解析度、刷新率、亮度、面板型號等細節會多很多。免費版每月 1,000 次，週報每週只用約 20 次。
 
 1. 打開 <https://app.tavily.com>，用 Google 帳號登入
 2. 登入後首頁會顯示一組 `tvly-` 開頭的 API Key，點複製
 3. GitHub → Settings → Secrets → 新增 `TAVILY_API_KEY`，貼上金鑰
-4. 下次執行「1. 每日蒐集」就會自動使用
+4. 下次執行「1. 每週蒐集」就會自動使用
 
 ## 升級：AI 換成 Claude（品質最有感的升級，每月約 US$20–60）
 
@@ -149,13 +150,13 @@ NAS 準時度較好、資料留在自己手上。需要 NAS 支援 Docker（Syno
 
 1. 把整個 repo 下載到 NAS，例如 `/volume1/docker/display-intel`
 2. 在該資料夾建立 `.env`，照 `.env.example` 填入 Gmail 與 Gemini 金鑰
-3. Synology「控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼」，使用者選 root，每天 06:15，指令：
+3. Synology「控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼」，使用者選 root，每週日 19:15，指令：
    ```
    cd /volume1/docker/display-intel && docker compose run --rm agent
    ```
 4. 報告會存在 `output/` 資料夾並寄出
 
-> NAS 版與 GitHub 版不要同時開啟，否則會收到兩封信。改用 NAS 後，到 GitHub Actions 把兩個每日排程按「Disable workflow」。
+> NAS 版與 GitHub 版不要同時開啟，否則會收到兩封信。改用 NAS 後，到 GitHub Actions 把兩個每週排程按「Disable workflow」。
 
 ---
 

@@ -1,9 +1,10 @@
-# 每天產生報告，09:30 準時寄出（台灣時間 08:47 啟動，預留 GitHub 排程延遲的緩衝）
-name: 2. 每日報告
+# 每週日產生週報，22:00 準時寄出（台灣時間 21:17 啟動，預留 GitHub 排程延遲的緩衝）
+# 想改回每天：cron 改成 "47 0 * * *"，並把 config.yaml 的 cadence 改成 daily、send_at 改成 "09:30"
+name: 2. 每週報告
 
 on:
   schedule:
-    - cron: "47 0 * * *"    # UTC 00:47 = 台灣時間 08:47
+    - cron: "17 13 * * 0"   # 每週日 UTC 13:17 = 台灣時間週日 21:17
   workflow_dispatch:
     inputs:
       mode:
@@ -60,6 +61,6 @@ jobs:
           git config user.email "display-intel-bot@users.noreply.github.com"
           git add data/intel.sqlite 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
-          git commit -m "data: 報告已寄出 $(TZ=Asia/Taipei date +%F)"
+          git commit -m "data: 週報已寄出 $(TZ=Asia/Taipei date +%F)"
           git pull --rebase -X theirs || true
           git push

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -118,7 +118,16 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "industry": industry,
     }
     ctx["ongoing"] = ongoing(db, cfg, ctx)
-    ctx["trend"] = weekly_trend(db) if today.weekday() == 0 else None
+    weekly = (cfg.get("schedule") or {}).get("cadence", "daily") == "weekly"
+    ctx["weekly"] = weekly
+    ctx["title"] = "筆電顯示器情報週報" if weekly else "筆電顯示器情報日報"
+    ctx["period_label"] = "本週" if weekly else "今日"
+    if weekly:
+        start = (today - timedelta(days=6)).strftime("%m/%d")
+        ctx["period"] = f"資料期間：{start}–{today.strftime('%m/%d')}（過去 7 天）"
+    else:
+        ctx["period"] = "資料期間：前一日報告後至今"
+    ctx["trend"] = weekly_trend(db) if (weekly or today.weekday() == 0) else None
     n_rumor = len(rumor_panels) + len(ctx["platform_rumors"]) + len(ctx["fab_rumors"])
     ctx["subject"] = (f"{cfg['report'].get('subject_prefix', '[顯示器情報]')} {ctx['date']}｜"
                       f"新機 {len(new_panels)}・更新 {len(updates)}・平台 {len(ctx['platform'])}・"
@@ -168,7 +177,7 @@ def weekly_trend(db: DB) -> dict | None:
 
 
 def highlights(ctx: dict, llm=None) -> list[str]:
-    """今日重點：有 AI 就請 AI 寫，失敗就用規則產生。"""
+    """重點摘要：有 AI 就請 AI 寫，失敗就用規則產生。"""
     facts = {
         "新機": [f"{r['brand']} {r['model']} {r['size']} {r['tech']} {r['res']} {r['refresh']} {r['panel_src']}" for r in ctx["new_panels"][:15]],
         "規格更新": [f"{r['brand']} {r['model']}：{r['changes']}" for r in ctx["updates"][:10]],
@@ -180,7 +189,7 @@ def highlights(ctx: dict, llm=None) -> list[str]:
     if llm is not None and any(facts.values()):
         try:
             data = llm.complete_json(
-                "你是筆電顯示器市場分析師。根據提供的今日資料，用繁體中文寫 3 到 5 句重點，最重要的放第一句。"
+                f"你是筆電顯示器市場分析師。根據提供的{ctx.get('period_label', '今日')}資料，用繁體中文寫 3 到 5 句重點，最重要的放第一句。"
                 "只能使用提供的資料，不可加入資料以外的資訊。傳聞必須註明是傳聞。"
                 '只輸出 JSON：{"highlights": ["...", "..."]}',
                 json.dumps(facts, ensure_ascii=False))
@@ -202,7 +211,7 @@ def highlights(ctx: dict, llm=None) -> list[str]:
         out.append(f"平台廠動態 {len(ctx['platform'])} 則：" + "、".join(sorted({r['vendor'] for r in ctx['platform']})) + "。")
     if ctx["fabs"]:
         out.append(f"面板廠產線動態 {len(ctx['fabs'])} 則。")
-    return out or ["今日沒有新的官方或媒體消息，下方列出近期仍在討論的主題。"]
+    return out or [f"{ctx.get('period_label', '今日')}沒有新的官方或媒體消息，下方列出近期仍在討論的主題。"]
 
 
 def render_html(ctx: dict) -> str:
@@ -226,7 +235,7 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
             ws.column_dimensions[col[0].column_letter].width = min(40, max(10, max(len(str(c.value or "")) for c in col) + 2))
 
     ws = wb.active
-    ws.title = "今日新增與更新"
+    ws.title = f"{ctx.get('period_label', '今日')}新增與更新"
     rows = []
     for kind, items in [("新機", ctx["new_panels"]), ("更新", ctx["updates"]), ("傳聞證實", ctx["confirmed"]), ("傳聞", ctx["rumor_panels"])]:
         for r in items:
