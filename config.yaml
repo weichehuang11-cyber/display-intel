@@ -10,17 +10,17 @@ schedule:
 
 llm:
   # ===== 免費版（預設）=====
-  # GitHub Models：在 GitHub Actions 內免費使用，有每日次數上限。
-  # 可用模型清單：https://github.com/marketplace?type=models（模型名稱若變動，改這裡即可）
-  provider: github_models
-  extract_model: openai/gpt-4o-mini
-  summary_model: openai/gpt-4o-mini
-  fallback_models: [openai/gpt-4.1-mini, openai/gpt-4.1-nano, openai/gpt-4o]  # 上面的模型不能用時依序嘗試
-  max_calls_per_run: 40             # 每天最多呼叫幾次 AI（免費額度內）
-  min_seconds_between_calls: 8      # 每次呼叫間隔，避免超過每分鐘上限
-  max_chars_per_call: 6000          # 每次送給 AI 的文字量（免費模型輸入長度有限）
-  max_chars_per_article: 2500
-  max_output_tokens: 4000
+  # Google Gemini 免費額度。金鑰申請：https://aistudio.google.com/apikey
+  # 免費額度與可用模型會變動，可在 https://aistudio.google.com/rate-limit 查看。模型名稱若變動，改這裡即可。
+  provider: gemini
+  extract_model: gemini-3.5-flash-lite
+  summary_model: gemini-3.5-flash-lite
+  fallback_models: [gemini-3.8-flash, gemini-3.1-flash-lite]  # 上面的模型不能用時依序嘗試
+  max_calls_per_run: 18             # 每次執行最多呼叫幾次 AI（免費版每日次數有限）
+  min_seconds_between_calls: 15     # 每次呼叫間隔，避免超過每分鐘上限
+  max_chars_per_call: 20000         # 每次送給 AI 的文字量（一次多送幾篇，省呼叫次數）
+  max_chars_per_article: 3500
+  max_output_tokens: 8000
 
   # ===== 升級成 Claude（付費，品質最好）=====
   # 把上面幾行換成下面這組，並在 GitHub Secrets 加上 ANTHROPIC_API_KEY：

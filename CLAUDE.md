@@ -15,7 +15,7 @@ collect.py  蒐集：RSS、Google 新聞 RSS（多語系）、Tavily（選用）
 verify.py   去重（網址＋標題相似度）→ AI 萃取後合併到資料庫、可信度、傳聞追蹤
 extract.py  萃取：多篇文章一批送 AI，輸出 JSON；回來後逐字比對原文依據
 derive.py   衍生規格（PPI、長寬比、像素密度）、合理性檢查、原文依據檢查
-llm.py      AI 介面：github_models（預設免費）/ gemini / anthropic，內建節流與額度保護
+llm.py      AI 介面：gemini（預設免費）/ anthropic，內建節流與額度保護；GitHub Models 已於 2026-07-30 停止服務
 db.py       SQLite（data/intel.sqlite，由 GitHub Actions commit 回 repo）
 report.py   未報告事件 → HTML Email（templates/report.html.j2）＋ Excel
 mailer.py   Gmail SMTP（應用程式密碼）

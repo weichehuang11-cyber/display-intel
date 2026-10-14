@@ -3,7 +3,7 @@
 每天自動蒐集全球 Notebook、Laptop、AIO 的螢幕規格（LCD／OLED）、平台廠（Intel、NVIDIA、AMD、Qualcomm）顯示技術、面板廠世代線動態，台灣時間 **09:30** 把整理好的報告寄到你的信箱，附完整 Excel 規格表。
 
 - 全部在 GitHub 雲端執行，**你的電腦不用開機**
-- 預設**完全免費**：GitHub Actions＋GitHub Models 免費 AI＋Gmail
+- 預設**完全免費**：GitHub Actions＋Google Gemini 免費 AI＋Gmail
 - 每個數值都經過原文比對，AI 讀錯或亂編的數字會被自動刪除
 
 ---
@@ -29,15 +29,20 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 1. 打開你的 repo 頁面（網址像 `https://github.com/你的帳號/display-intel`）
 2. 點上方的 **Settings**（齒輪圖示，在最右邊）
 3. 左側選單找到 **Secrets and variables** → 點 **Actions**
-4. 點綠色按鈕 **New repository secret**，依序新增以下三個（每個新增完按 **Add secret**）：
+4. 點綠色按鈕 **New repository secret**，依序新增以下四個（每個新增完按 **Add secret**）：
 
 | Name（名稱，要一模一樣） | Secret（內容） |
 | --- | --- |
 | `SMTP_USER` | 你的 Gmail 地址，例如 `abc@gmail.com` |
 | `SMTP_PASSWORD` | 步驟 1 複製的 16 個字母（空格可留可不留） |
 | `REPORT_RECIPIENTS` | 收報告的信箱，多個用英文逗號分隔，例如 `abc@gmail.com,boss@company.com` |
+| `GEMINI_API_KEY` | Google Gemini 免費 AI 金鑰，申請方式見下方 |
 
-AI 不需要另外申請金鑰：GitHub 會自動提供免費額度。
+**申請 Gemini 免費金鑰（約 3 分鐘）**
+1. 打開 <https://aistudio.google.com/apikey>，用 Google 帳號登入，同意使用條款
+2. 點「**Create API key**」（建立 API 金鑰），專案可選預設的那一個
+3. 複製出現的金鑰（`AIza` 開頭的一長串），存成上表的 `GEMINI_API_KEY`
+4. 不需要綁信用卡；免費版每日次數有限，程式已經自動控制用量
 
 ### 步驟 3：確認 Actions 已開啟
 
@@ -101,8 +106,9 @@ AI 不需要另外申請金鑰：GitHub 會自動提供免費額度。
 **Q：Actions 出現紅色 ✗ 失敗怎麼辦？**
 點進那次執行，展開紅色的步驟，把最後 20 行複製給 Claude 看。常見原因：
 - `Gmail 登入失敗` → SMTP_PASSWORD 打錯，或沒開兩步驟驗證
-- `401` 或 `403` 出現在 models.github.ai → AI 免費額度暫時無法使用，隔天通常恢復
-- `unknown model` 或 `404` → 免費模型名稱改了：到 <https://github.com/marketplace?type=models> 找一個 OpenAI 的 mini 模型，把 `config.yaml` 的 `extract_model` 和 `summary_model` 換成新名稱（格式如 `openai/xxx`）
+- `GEMINI_API_KEY` 缺少、`400` 或 `403` → Gemini 金鑰沒存好或打錯，重新複製一次
+- `429` 或「免費額度已用完」→ 當天免費次數用完，隔天自動恢復；常發生就把 `max_calls_per_run` 調小
+- `404` 或 model not found → 免費模型名稱改了：到 <https://ai.google.dev/gemini-api/docs/models> 找一個 Flash 或 Flash-Lite 模型，把 `config.yaml` 的 `extract_model` 和 `summary_model` 換成新名稱
 
 **Q：每天都會收到信嗎？沒有新消息也會寄？**
 會。沒有新消息時，報告會列出「持續討論中」的近期主題。若某天完全失敗，會寄一封「執行失敗通知」到寄件信箱。
@@ -126,7 +132,6 @@ GitHub 會停用長期沒有活動的 repo 排程；本程式每天會把資料�
 
 其他選配：
 - 搜尋 API：到 <https://tavily.com> 申請（有免費額度），Secrets 新增 `TAVILY_API_KEY`，可補抓全文
-- Google Gemini：`provider: gemini`，Secrets 新增 `GEMINI_API_KEY`
 
 ---
 
@@ -135,7 +140,7 @@ GitHub 會停用長期沒有活動的 repo 排程；本程式每天會把資料�
 NAS 準時度較好、資料留在自己手上。需要 NAS 支援 Docker（Synology 叫 Container Manager，QNAP 叫 Container Station）。
 
 1. 把整個 repo 下載到 NAS，例如 `/volume1/docker/display-intel`
-2. 在該資料夾建立 `.env`（照 `.env.example` 填），另外加上 `GH_MODELS_TOKEN=`：到 GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens 建立，權限勾選 **Models: Read**
+2. 在該資料夾建立 `.env`，照 `.env.example` 填入 Gmail 與 Gemini 金鑰
 3. Synology「控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼」，使用者選 root，每天 06:15，指令：
    ```
    cd /volume1/docker/display-intel && docker compose run --rm agent

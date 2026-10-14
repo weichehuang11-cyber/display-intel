@@ -184,11 +184,11 @@ def test_ingest_and_report(db, tmp_path):
 
 # ---------- 免費 AI 介面（模擬伺服器，不連網） ----------
 
-def test_github_models_request_and_429(monkeypatch):
+def test_gemini_request_and_429(monkeypatch):
     import httpx
     from display_intel.llm import LLM
 
-    monkeypatch.setenv("GITHUB_TOKEN", "fake")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
     monkeypatch.setattr("time.sleep", lambda s: None)
     calls = []
 
@@ -198,10 +198,10 @@ def test_github_models_request_and_429(monkeypatch):
             return httpx.Response(429, headers={"retry-after": "5"})
         return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
 
-    llm = LLM("github_models", "openai/gpt-4o-mini", max_calls=5)
+    llm = LLM("gemini", "gemini-3.5-flash-lite", max_calls=5)
     llm._http = httpx.Client(transport=httpx.MockTransport(handler), headers={"Authorization": "Bearer fake"})
     assert llm.complete_json("sys", "user") == {"ok": True}
-    assert calls[0].url == "https://models.github.ai/inference/chat/completions"
+    assert calls[0].url == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     assert calls[0].headers["authorization"] == "Bearer fake"
     assert llm.calls == 2
 
@@ -210,8 +210,8 @@ def test_budget_limit(monkeypatch):
     import httpx
     from display_intel.llm import LLM
 
-    monkeypatch.setenv("GITHUB_TOKEN", "fake")
-    llm = LLM("github_models", "m", max_calls=1)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    llm = LLM("gemini", "m", max_calls=1)
     llm._http = httpx.Client(transport=httpx.MockTransport(
         lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})))
     llm.complete_json("s", "u")
@@ -234,9 +234,25 @@ def test_extract_splits_batch_on_truncation():
 def test_working_llm_falls_back(monkeypatch):
     from display_intel import __main__ as main
     from display_intel.llm import LLM
-    monkeypatch.setenv("GITHUB_TOKEN", "fake")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
     monkeypatch.setattr(LLM, "probe", lambda self: "ok" if self.model == "good" else "HTTPStatusError：404 unknown model")
     stats = {}
-    llm = main._working_llm({"llm": {"provider": "github_models", "extract_model": "bad", "fallback_models": ["good"]}}, stats)
+    llm = main._working_llm({"llm": {"provider": "gemini", "extract_model": "bad", "fallback_models": ["good"]}}, stats)
     assert llm.model == "good" and stats["llm_model"] == "good"
     assert "404" in stats["llm_probe"]["bad"]
+
+
+def test_non_json_body_gives_clear_error(monkeypatch):
+    import httpx
+    from display_intel.llm import LLM
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    llm = LLM("gemini", "m", max_calls=3)
+    llm._http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html>retired</html>")))
+    with pytest.raises(RuntimeError, match="回覆格式異常"):
+        llm.complete_json("s", "u")
+
+
+def test_github_models_retired_message():
+    from display_intel.llm import LLM
+    with pytest.raises(RuntimeError, match="gemini"):
+        LLM("github_models", "x")

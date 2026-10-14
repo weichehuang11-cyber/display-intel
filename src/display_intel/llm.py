@@ -1,9 +1,9 @@
 """AI 模型介面：同一套程式可切換免費或付費模型。
 
 provider 選項（在 config.yaml 的 llm.provider 設定）：
-- github_models：免費（有每日上限），在 GitHub Actions 內用內建 GITHUB_TOKEN，不用另外申請
-- gemini：Google AI Studio 免費額度，需 GEMINI_API_KEY
+- gemini：Google AI Studio 免費額度（預設），需 GEMINI_API_KEY
 - anthropic：Claude 付費 API，品質最好，需 ANTHROPIC_API_KEY
+（GitHub Models 已於 2026-07-30 停止服務，不再支援）
 
 所有 provider 都回傳 dict（JSON）。內建節流與 429 重試，免費額度用完時會停止並回報，不會讓流程崩潰。
 """
@@ -22,7 +22,6 @@ from .config import env
 log = logging.getLogger(__name__)
 
 OPENAI_COMPATIBLE = {
-    "github_models": ("https://models.github.ai/inference/chat/completions", ("GITHUB_TOKEN", "GH_MODELS_TOKEN")),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", ("GEMINI_API_KEY",)),
 }
 
@@ -60,20 +59,22 @@ class LLM:
         if provider == "anthropic":
             import anthropic
             self._client = anthropic.Anthropic(api_key=env("ANTHROPIC_API_KEY", required=True))
+        elif provider == "github_models":
+            raise RuntimeError("GitHub Models 已於 2026-07-30 停止服務，請把 config.yaml 的 provider 改成 gemini")
         elif provider in OPENAI_COMPATIBLE:
             url, keys = OPENAI_COMPATIBLE[provider]
             token = next((env(k) for k in keys if env(k)), "")
             if not token:
                 raise RuntimeError(f"provider={provider} 需要環境變數 {' 或 '.join(keys)}")
             self._url = url
-            self._http = httpx.Client(timeout=httpx.Timeout(120.0),
-                                      headers={"Authorization": f"Bearer {token}"})
+            self._http = httpx.Client(timeout=httpx.Timeout(120.0), follow_redirects=True,
+                                      headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
         else:
             raise ValueError(f"不支援的 provider：{provider}")
 
     @classmethod
     def from_config(cls, llm_cfg: dict, role: str = "extract") -> "LLM":
-        return cls(provider=llm_cfg.get("provider", "github_models"),
+        return cls(provider=llm_cfg.get("provider", "gemini"),
                    model=llm_cfg.get(f"{role}_model") or llm_cfg["extract_model"],
                    max_calls=llm_cfg.get("max_calls_per_run", 50),
                    min_interval_s=llm_cfg.get("min_seconds_between_calls", 0),
@@ -126,14 +127,16 @@ class LLM:
         r = self._http.post(self._url, json={
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "response_format": {"type": "json_object"},
             "temperature": 0,
             "max_tokens": self.max_output_tokens,
         })
         if r.status_code >= 400:
             # 把伺服器的錯誤說明帶進訊息，方便除錯
             raise httpx.HTTPStatusError(f"{r.status_code}：{r.text[:400]}", request=r.request, response=r)
-        choice = r.json()["choices"][0]
+        try:
+            choice = r.json()["choices"][0]
+        except Exception:
+            raise RuntimeError(f"AI 服務回覆格式異常（HTTP {r.status_code}）：{r.text[:300]!r}") from None
         content = (choice.get("message") or {}).get("content") or ""
         if choice.get("finish_reason") == "length":
             raise OutputTruncated("模型輸出被截斷")

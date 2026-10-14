@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: write
-  models: read
 
 concurrency:
   group: database
@@ -34,7 +33,6 @@ jobs:
       - name: 產生並寄送報告
         env:
           PYTHONPATH: src
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
