@@ -585,3 +585,18 @@ def test_platform_matrix_and_card(db, tmp_path):
     assert "🔌 AMD Ryzen AI 9・NVIDIA RTX 5070" in html and "可變刷新率" in html
     import openpyxl
     assert "平台適配" in openpyxl.load_workbook(xlsx).sheetnames
+
+
+def test_display_power_tech():
+    from display_intel import ihv
+    assert ihv.normalize_power_tech(["Intel Low Refresh Rate 2.0", "LRR 1.0", "DPST 8.0", "Panel Self Refresh 2",
+                                     "panel replay", "UBRR", "OLED Power Saving Technology"]) == \
+        ["LRR 2.0", "LRR 1.0", "DPST 8.0", "PSR2", "Panel Replay", "UBRR", "OPST"]
+    ok = PanelSpec(cpu_platform="Intel Core Ultra 7 258V", display_power_tech=["LRR 2.0", "DPST 8.0"])
+    assert {i["name"]: i for i in ihv.evaluate(ok)}["節能搭配"]["status"] == "✓"
+    bad = PanelSpec(cpu_platform="AMD Ryzen AI 9", display_power_tech=["DPST"])
+    item = {i["name"]: i for i in ihv.evaluate(bad)}["節能搭配"]
+    assert item["status"] == "✗" and "DPST" in item["note"]
+    from display_intel.extract import fix_panel_source
+    s, _ = fix_panel_source(PanelSpec(brand="HP", model="X", display_power_tech=["Intel DPST 7.0"]))
+    assert s.display_power_tech == ["DPST 7.0"]

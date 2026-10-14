@@ -21,6 +21,7 @@ FEATURES = [
     ("高解析 2.8K+", "水平解析度 2880 以上"),
     ("低刷新節能", "LTPO、1Hz 或動態刷新等節能技術"),
     ("DC 調光／低閃爍", "DC 調光、高頻 PWM 或無閃爍認證"),
+    ("平台顯示節能", "LRR、UBRR、DPST、OPST、PSR、Panel Replay 等平台節能技術"),
     ("HDR 認證", "VESA DisplayHDR 等認證"),
     ("觸控", "支援觸控"),
 ]
@@ -110,6 +111,8 @@ def features(spec: PanelSpec) -> set[str]:
         out.add("DC 調光／低閃爍")
     if "displayhdr" in _low(spec.certifications) or "hdr" in _low(spec.certifications):
         out.add("HDR 認證")
+    if spec.display_power_tech:
+        out.add("平台顯示節能")
     if spec.touch:
         out.add("觸控")
     return out
@@ -287,6 +290,10 @@ GLOSSARY = {
     "VRR": "可變刷新率，畫面更新與顯示卡同步，減少撕裂；G-SYNC、FreeSync 都屬於此類。",
     "LTPO": "可在 1Hz 到 120Hz 間切換的背板技術，靜態畫面時省電。",
     "PPI": "每英吋像素數，越高越細緻。由解析度和尺寸計算。",
+    "LRR": "Intel Low Refresh Rate，畫面靜止或變化少時降低刷新率以省電；不同版本的切換範圍與平順度不同。",
+    "DPST": "Intel Display Power Saving Technology，依畫面內容調降背光並補償對比，以降低 LCD 耗電。",
+    "OPST": "Intel OLED Power Saving Technology，針對 OLED 面板的節能技術。",
+    "PSR／Panel Replay": "面板自刷新：畫面不變時由面板自行維持影像，讓顯示輸出暫停以省電。",
     "MUX／Advanced Optimus": "讓獨立顯示卡直接輸出到螢幕，遊戲延遲較低、效能較好；一般 Optimus 則經過內顯轉送。",
     "Intel Evo": "Intel 筆電認證，對螢幕、續航、喚醒速度等有最低要求。",
     "Copilot+ PC": "Microsoft 的 AI PC 認證，需要具備一定效能的 NPU。",
@@ -300,5 +307,9 @@ def glossary_for(text: str) -> list[tuple[str, str]]:
     keys = {"OLED": "oled", "Tandem OLED": "tandem", "Mini LED": "mini led", "IPS": "ips", "nits": "nits",
             "DCI-P3": "dci-p3", "sRGB": "srgb", "ΔE（Delta E）": "δe", "PWM 調光": "pwm", "DC 調光": "dc 調光",
             "VRR": "sync", "LTPO": "ltpo", "PPI": "ppi", "G8.6 世代線": "8.6",
-            "MUX／Advanced Optimus": "獨顯直連", "Intel Evo": "evo", "Copilot+ PC": "copilot+"}
+            "LRR": "Intel Low Refresh Rate，畫面靜止或變化少時降低刷新率以省電；不同版本的切換範圍與平順度不同。",
+    "DPST": "Intel Display Power Saving Technology，依畫面內容調降背光並補償對比，以降低 LCD 耗電。",
+    "OPST": "Intel OLED Power Saving Technology，針對 OLED 面板的節能技術。",
+    "PSR／Panel Replay": "面板自刷新：畫面不變時由面板自行維持影像，讓顯示輸出暫停以省電。",
+    "MUX／Advanced Optimus": "獨顯直連", "Intel Evo": "evo", "Copilot+ PC": "copilot+"}
     return [(k, GLOSSARY[k]) for k, needle in keys.items() if needle in t]

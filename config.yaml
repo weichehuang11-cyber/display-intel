@@ -25,7 +25,7 @@ collection:
     lookback_hours: 170
     news_window: 7d
     tavily_time_range: week
-    tavily_queries_per_run: 40
+    tavily_queries_per_run: 42
     max_ai_calls: 60
     enrich_models: 15
     extract_model: gemini-3.8-flash   # 週日用較準確的模型（不能用時自動改回上方預設模型）
@@ -150,6 +150,8 @@ sources:
       - "NVIDIA G-SYNC laptop display"
       - "AMD FreeSync laptop display"
       - "Qualcomm Snapdragon laptop display"
+      - "Intel LRR low refresh rate laptop display"
+      - "DPST OPST panel self refresh laptop power"
       # --- 多語系 ---
       - "筆電 OLED 螢幕 規格"
       - "筆電 面板 友達 群創"

@@ -32,6 +32,7 @@ FIELD_LABELS = {
     "dimming": "調光", "pwm_hz": "PWM 頻率", "low_power_tech": "節能技術", "eye_care": "護眼",
     "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
     "cpu_platform": "處理器", "gpu": "顯示卡", "gpu_switching": "顯示切換", "platform_certifications": "平台認證",
+    "display_power_tech": "平台顯示節能",
 }
 VENDOR_ORDER = ["Intel", "NVIDIA", "AMD", "Qualcomm"]
 FAB_STATUS = {"planned": "規劃", "construction": "建廠", "equipment": "設備進駐", "trial": "試產",
@@ -83,7 +84,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     extras = "・".join(x for x in [
         _fmt(s.vrr_tech), f"Mini LED {s.mini_led_zones} 區" if s.mini_led_zones else "",
         f"{s.dimming} 調光" if s.dimming else "", f"PWM {s.pwm_hz:g}Hz" if s.pwm_hz else "",
-        _fmt(s.low_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),
+        _fmt(s.low_power_tech), _fmt(s.display_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),
         s.surface or ""] if x)
     if s.touch is True:
         touch = "支援觸控" + (f"・觸控筆 {s.stylus}" if s.stylus else "")

@@ -51,10 +51,50 @@ def gpu_vendor(spec: PanelSpec) -> Optional[str]:
     return None
 
 
+# 平台顯示節能技術：別名 → 標準名稱、所屬平台（None 表示各平台通用）
+POWER_TECH = [
+    (r"\blrr\b|low[\s-]?refresh[\s-]?rate", "LRR", "Intel"),
+    (r"\bubrr\b", "UBRR", "Intel"),
+    (r"\bdpst\b|display power sav", "DPST", "Intel"),
+    (r"\bopst\b|oled power sav", "OPST", "Intel"),
+    (r"\bs?drrs\b|refresh rate switching", "DRRS", "Intel"),
+    (r"panel replay", "Panel Replay", None),
+    (r"\bpsr\s*2\b|psr2|panel self[\s-]?refresh\s*2", "PSR2", None),
+    (r"\bpsr\b|panel self[\s-]?refresh", "PSR", None),
+    (r"vari[\s-]?bright", "Vari-Bright", "AMD"),
+]
+
+
+def normalize_power_tech(items: Optional[list[str]]) -> list[str]:
+    """統一寫法並保留版本，例如「Intel Low Refresh Rate 2.0」→「LRR 2.0」。"""
+    out = []
+    for raw in items or []:
+        t = str(raw).strip()
+        low = t.lower()
+        for pattern, name, _vendor in POWER_TECH:
+            if re.search(pattern, low):
+                ver = re.search(r"(\d+(?:\.\d+)?)", re.sub(r"psr\s*2|panel self[\s-]?refresh\s*2", "", low))
+                label = f"{name} {ver.group(1)}" if ver and name not in ("PSR2",) else name
+                break
+        else:
+            label = t
+        if label not in out:
+            out.append(label)
+    return out
+
+
+def power_tech_vendor(label: str) -> Optional[str]:
+    for pattern, name, vendor in POWER_TECH:
+        if label.split()[0] == name:
+            return vendor
+    return None
+
+
 def low_refresh(spec: PanelSpec) -> bool:
     """面板是否支援低刷新／動態刷新等節能技術（VRR 範圍從 1Hz 起算也算）。"""
-    lp = _low(spec.low_power_tech)
-    if any(k in lp for k in ("ltpo", "1hz", "動態刷新", "动态刷新", "dynamic refresh", "psr", "self refresh", "自刷新")):
+    lp = _low(spec.low_power_tech) + " " + _low(spec.display_power_tech)
+    if any(k in lp for k in ("ltpo", "1hz", "動態刷新", "动态刷新", "dynamic refresh", "psr", "self refresh", "自刷新",
+                             "lrr", "low refresh", "drrs", "panel replay")):
         return True
     return bool(re.match(r"\s*1\s*(hz)?\s*[-–~]", _low(spec.vrr_range)))
 
@@ -96,7 +136,13 @@ def evaluate(spec: PanelSpec) -> list[dict]:
         items.append(("獨顯直連", "?", f"{gv} 獨顯，未標示切換方式"))
 
     # 3. 節能搭配（面板低刷新／動態刷新）
-    if low_refresh(spec):
+    techs = normalize_power_tech(spec.display_power_tech)
+    mismatch = [t for t in techs if power_tech_vendor(t) and cv and power_tech_vendor(t) != cv]
+    if mismatch:
+        items.append(("節能搭配", "✗", f"標示 {'、'.join(mismatch)}，但處理器平台是 {cv}，資訊可能有誤"))
+    elif techs:
+        items.append(("節能搭配", "✓", "、".join(techs)))
+    elif low_refresh(spec):
         items.append(("節能搭配", "✓", "面板支援低刷新或動態刷新" + (f"（{cv} 平台）" if cv else "")))
     else:
         items.append(("節能搭配", "?", ""))

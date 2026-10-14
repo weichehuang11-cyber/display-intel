@@ -34,6 +34,8 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
    stylus（觸控筆）：有寫支援的觸控筆或協定（例如 MPP 2.0、USI、Active Pen）就填。
 12. 平台欄位：cpu_platform 填處理器型號；gpu 填獨立顯示卡（只有內顯可省略）；gpu_switching 填 MUX、Advanced Optimus 等顯示切換方式；
     platform_certifications 填 Intel Evo、Copilot+ PC、NVIDIA Studio、AMD Advantage 等認證。一樣要附原文，沒寫就省略。
+13. display_power_tech：平台顯示節能技術，保留文章寫的版本號，例如 LRR 1.0／LRR 2.0（Low Refresh Rate）、UBRR、
+    DPST（Display Power Saving Technology，含版本）、OPST、PSR／PSR2（Panel Self Refresh）、Panel Replay、DRRS／SDRRS、AMD Vari-Bright。要附原文。
 9. panels 只收「有品牌且有具體機型名稱」的產品；只說「某品牌新筆電」而沒有機型名稱的，不要列。
 10. panel_maker 只填面板製造商（如 BOE、Samsung Display、LG Display、AUO、Innolux、CSOT、Sharp），不可填筆電品牌。
 11. panel_model 只填面板料號（如 NE160QDM-NY1、ATNA60CL10），行銷名稱（如 Lumina OLED、Nebula Display）不要填。"""
@@ -49,7 +51,7 @@ FIELD_GUIDE = """輸出格式：
     "refresh_hz","vrr_range","response_ms","vrr_tech":[],
     "backlight","mini_led_zones","dimming","pwm_hz",
     "low_power_tech":[],"eye_care":[],"touch"(true/false),"stylus","glass","screen_to_body_pct","form_factor",
-    "cpu_platform","gpu","gpu_switching","platform_certifications":[],
+    "cpu_platform","gpu","gpu_switching","platform_certifications":[],"display_power_tech":[],
     "evidence": {"欄位名": "原文片段"} } ],
   "platform_techs": [ {"vendor","tech_name",
     "category"(sync|power|image|interface|certification|other),
@@ -179,6 +181,9 @@ def fix_panel_source(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
         flags.append(f"面板型號看起來是行銷名稱，已移除：{pm}")
     if data.get("panel_maker"):
         data["panel_maker"] = canonical_maker(data["panel_maker"])
+    if data.get("display_power_tech"):
+        from .ihv import normalize_power_tech
+        data["display_power_tech"] = normalize_power_tech(data["display_power_tech"]) or None
     for f in ("panel_maker", "panel_model"):
         if data.get(f) is None:
             data["evidence"].pop(f, None)

@@ -99,7 +99,7 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 | --- | --- |
 | 可變刷新率 | 是否標示 G-SYNC、FreeSync 或 VRR 範圍；標示 G-SYNC 但不是 NVIDIA 獨顯會被標為矛盾 |
 | 獨顯直連 | 有獨顯時，是否有 MUX 或 Advanced Optimus（遊戲延遲較低） |
-| 節能搭配 | 面板是否支援低刷新、動態刷新或自刷新 |
+| 節能搭配 | 平台顯示節能技術（LRR 1.0／2.0、UBRR、DPST、OPST、PSR／PSR2、Panel Replay、DRRS、AMD Vari-Bright，保留版本號），或面板低刷新、動態刷新；標示 Intel 專屬技術但平台不是 Intel 會被標為矛盾 |
 | HDR | 是否有 DisplayHDR、Dolby Vision 等標示 |
 | 平台認證 | Intel Evo、Copilot+ PC、NVIDIA Studio、AMD Advantage 等 |
 

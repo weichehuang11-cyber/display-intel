@@ -111,6 +111,7 @@ class PanelSpec(BaseModel):
     gpu: Optional[str] = Field(None, description="獨立顯示卡，例如 NVIDIA GeForce RTX 5070 Laptop；只有內顯就寫內顯型號或省略")
     gpu_switching: Optional[str] = Field(None, description="顯示切換：MUX、Advanced Optimus、Optimus、AMD Smart Access Graphics 等")
     platform_certifications: Optional[list[str]] = Field(None, description="Intel Evo、Copilot+ PC、NVIDIA Studio、AMD Advantage 等平台認證")
+    display_power_tech: Optional[list[str]] = Field(None, description="平台顯示節能技術（含版本），例如 LRR 2.0、UBRR、DPST 8.0、OPST、PSR2、Panel Replay")
     # 依據：欄位名稱 → 文章原文片段（必須逐字出自文章）
     evidence: dict[str, str] = Field(default_factory=dict)
 
