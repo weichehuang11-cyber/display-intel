@@ -136,6 +136,28 @@ def is_identifiable(spec: PanelSpec) -> bool:
     return bool(spec.brand and spec.brand.strip() and model and model not in GENERIC_MODELS and len(model) >= 2)
 
 
+BRAND_CANON = {b.lower(): b for b in [
+    "ASUS", "Acer", "Apple", "Dell", "HP", "Lenovo", "MSI", "Samsung", "Microsoft", "Razer", "LG", "Gigabyte",
+    "Huawei", "Xiaomi", "Honor", "Framework", "Alienware", "Thunderobot", "Machenike", "Mechrevo", "Colorful",
+    "Medion", "Dynabook", "Fujitsu", "VAIO", "Panasonic", "Google", "Infinix", "Tecno", "Chuwi"]}
+
+
+def normalize_identity(spec: PanelSpec) -> PanelSpec:
+    """統一品牌大小寫（Asus → ASUS），並去掉機型名稱開頭重複的品牌（Framework Framework Laptop 12）。"""
+    data = spec.model_dump()
+    brand = (spec.brand or "").strip()
+    first = brand.split()[0].lower() if brand else ""
+    if brand.lower() in BRAND_CANON:
+        brand = BRAND_CANON[brand.lower()]
+    elif first in BRAND_CANON:  # 例如「Dell Alienware」保留後半，只統一大小寫
+        brand = BRAND_CANON[first] + brand[len(first):]
+    model = (spec.model or "").strip()
+    if brand and model.lower().startswith(brand.lower() + " "):
+        model = model[len(brand) + 1:].strip()
+    data["brand"], data["model"] = brand or None, model or None
+    return PanelSpec(**data)
+
+
 def fix_panel_source(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
     """移除填錯的面板來源：面板廠填成筆電品牌、面板型號填成行銷名稱。"""
     from .panel_decode import canonical_maker, decode
@@ -167,7 +189,7 @@ def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[s
     for p in ex.panels:
         cleaned, f = clean_spec(p, text)
         flags += f
-        cleaned, f = fix_panel_source(cleaned)
+        cleaned, f = fix_panel_source(normalize_identity(cleaned))
         flags += f
         if is_identifiable(cleaned):  # 品牌和具體機型都要有，否則無法追蹤
             panels.append(cleaned)

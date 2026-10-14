@@ -55,8 +55,14 @@ def completeness(rec: PanelRecord) -> tuple[int, int]:
 
 def to_fill(records: list[PanelRecord], now: datetime, days: int = 45, top: int = 5) -> list[dict]:
     """待補清單：近期機型中，重點欄位缺最多的幾款。"""
-    recent = [r for r in records if r.first_seen >= now - timedelta(days=days) and r.confidence.rank >= Confidence.C.rank]
-    recent.sort(key=lambda r: (completeness(r)[0], -r.first_seen.timestamp()))
+    from .verify import _norm, model_norm
+    best: dict = {}
+    for r in records:
+        if r.first_seen >= now - timedelta(days=days) and r.confidence.rank >= Confidence.C.rank:
+            k = (_norm(r.spec.brand), model_norm(r.spec))
+            if k not in best or completeness(r)[0] > completeness(best[k])[0]:
+                best[k] = r  # 同機型多種選配時，以資料最完整的那筆代表
+    recent = sorted(best.values(), key=lambda r: (completeness(r)[0], -r.first_seen.timestamp()))
     return [{"name": f"{r.spec.brand} {r.spec.model}", "score": "%d/%d" % completeness(r),
              "missing": "、".join(missing_fields(r)[:6])} for r in recent[:top]]
 

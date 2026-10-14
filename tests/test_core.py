@@ -460,3 +460,23 @@ def test_profiles_schedule():
     assert cfg["run"]["profile"] == "full" and cfg["run"]["extract_model"] and cfg["run"]["enrich_models"] == 15
     apply_profile(cfg, profile="enrich")
     assert cfg["run"]["collect_news"] is False and cfg["run"]["tavily_queries"] == []
+
+
+def test_identity_and_grouping(db, tmp_path):
+    from display_intel.extract import normalize_identity
+    s = normalize_identity(PanelSpec(brand="Asus", model="ASUS Zenbook 14"))
+    assert (s.brand, s.model) == ("ASUS", "Zenbook 14")
+    s = normalize_identity(PanelSpec(brand="Framework", model="Framework Laptop 12"))
+    assert s.model == "Laptop 12"
+    assert normalize_identity(PanelSpec(brand="dell alienware", model="x")).brand == "Dell alienware"
+    from display_intel.report import build_report
+    a = art("OMEN", "HP OMEN 15 has a 15.6-inch 1920x1080 panel and a 2560x1440 panel option.", source_type="official")
+    ex = Extraction(relevant=True, panels=[
+        PanelSpec(brand="HP", model="OMEN 15", size_inch=15.6, res_w=1920, res_h=1080),
+        PanelSpec(brand="HP", model="OMEN 15", size_inch=15.6, res_w=2560, res_h=1440)])
+    verify.ingest(db, [(a, ex, [])])
+    assert len(db.all_panels()) == 2  # 兩種選配分開記錄
+    cfg = {"schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}}
+    ctx, html, _, _ = build_report(db, cfg)
+    assert len(ctx["new_panels"]) == 1 and len(ctx["new_panels"][0]["options"]) == 2
+    assert "2 種螢幕選配" in html and ctx["kpis"][0]["value"] == "1"

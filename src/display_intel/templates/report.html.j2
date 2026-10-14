@@ -9,14 +9,19 @@
 {%- macro card(c, show_changes=False) -%}
 <div style="border:1px solid #e3e6ea;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff;">
   <div style="font-size:15px;font-weight:bold;line-height:1.4;">{{ c.brand }} {{ c.model }}</div>
-  <div style="margin:4px 0 6px;">{{ badge(c.conf_code, c.confidence) }} <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;line-height:18px;color:{% if c.score_pct >= 70 %}#1e7d4f{% elif c.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};background:#f1f3f5;">規格 {{ c.score }}</span> {% for t in c.tags %}{{ tagchip(t) }}{% endfor %}</div>
-  {% if c.screen %}<div style="font-size:14px;line-height:1.6;">🖥 {{ c.screen }}</div>{% endif %}
-  {% if c.bright %}<div style="font-size:14px;line-height:1.6;">☀ {{ c.bright }}</div>{% endif %}
-  <div style="font-size:14px;line-height:1.6;{% if not c.panel_known %}color:#999;{% endif %}">🏭 {{ c.panel }}</div>
-  {% if c.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ c.extras }}</div>{% endif %}
-  {% if c.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ c.derived }}</div>{% endif %}
-  {% if show_changes and c.changes %}<div style="font-size:13px;line-height:1.6;color:#1e7d4f;margin-top:4px;">更新：{{ c.changes }}</div>{% endif %}
-  <div style="font-size:12px;margin-top:6px;">{{ src(c) }}</div>
+  <div style="margin:4px 0 6px;">{{ badge(c.conf_code, c.confidence) }} <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;line-height:18px;color:{% if c.score_pct >= 70 %}#1e7d4f{% elif c.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};background:#f1f3f5;">規格 {{ c.score }}</span>{% if c.options|length > 1 %} <span style="font-size:11px;color:#777;">{{ c.options|length }} 種螢幕選配</span>{% endif %} {% for t in c.tags %}{{ tagchip(t) }}{% endfor %}</div>
+  {% for o in c.options %}
+  <div style="{% if not loop.first %}border-top:1px dashed #e3e6ea;margin-top:8px;padding-top:8px;{% endif %}">
+    {% if c.options|length > 1 %}<div style="font-size:11px;color:#999;">選配 {{ loop.index }}</div>{% endif %}
+    {% if o.screen %}<div style="font-size:14px;line-height:1.6;">🖥 {{ o.screen }}</div>{% endif %}
+    {% if o.bright %}<div style="font-size:14px;line-height:1.6;">☀ {{ o.bright }}</div>{% endif %}
+    <div style="font-size:14px;line-height:1.6;{% if not o.panel_known %}color:#999;{% endif %}">🏭 {{ o.panel }}</div>
+    {% if o.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ o.extras }}</div>{% endif %}
+    {% if o.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ o.derived }}</div>{% endif %}
+    {% if show_changes and o.changes %}<div style="font-size:13px;line-height:1.6;color:#1e7d4f;margin-top:4px;">更新：{{ o.changes }}</div>{% endif %}
+  </div>
+  {% endfor %}
+  <div style="font-size:12px;margin-top:6px;">{% for o in c.sources %}{{ src(o) }}{% if not loop.last %}　{% endif %}{% endfor %}</div>
 </div>
 {%- endmacro -%}
 <!doctype html>

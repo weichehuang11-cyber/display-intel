@@ -102,6 +102,27 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     }
 
 
+def group_by_model(cards: list[dict]) -> list[dict]:
+    """同一款機型的不同螢幕選配合併成一張卡片（例如 OMEN 15 的 FHD 144Hz 與 QHD 165Hz）。"""
+    from .verify import _norm, model_norm
+    groups: dict[tuple, list[dict]] = {}
+    for c in cards:
+        k = (_norm(c["rec"].spec.brand), model_norm(c["rec"].spec))
+        groups.setdefault(k, []).append(c)
+    out = []
+    for opts in groups.values():
+        opts.sort(key=lambda c: (-c["rec"].confidence.rank, -c["score_pct"]))
+        best = max(opts, key=lambda c: c["score_pct"])
+        head = dict(opts[0])
+        head["options"] = opts
+        head["tags"] = list(dict.fromkeys(t for c in opts for t in c["tags"]))
+        head["score"], head["score_pct"] = best["score"], best["score_pct"]
+        head["panel_known"] = any(c["panel_known"] for c in opts)
+        head["sources"] = list({c["source_url"]: c for c in opts if c["source_url"]}.values())[:3]
+        out.append(head)
+    return sorted(out, key=lambda c: (c["brand"].lower(), c["model"].lower()))
+
+
 def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dict:
     weekly = (cfg.get("schedule") or {}).get("cadence", "daily") == "weekly"
     period_start = (today - timedelta(days=7 if weekly else 1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -159,15 +180,28 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "fabs": [r for r in fab_rows if not r["rumor"]], "fab_rumors": [r for r in fab_rows if r["rumor"]],
         "industry": industry,
         "kpis": analytics.kpis(new_panels),
+        "new_options": len(new_panels),
         "standouts": standout_lines,
         "wow": analytics.week_over_week(all_records, period_start, 7 if weekly else 1),
         "mentions": analytics.tech_mentions(all_records, period_start),
         "matrix": analytics.brand_maker_matrix(all_records),
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
         "to_fill": analytics.to_fill(all_records, today),
-        "panel_known": sum(1 for c in new_panels if c["panel_known"]),
     }
-    ctx["kpis"].append({"label": "規格更新", "value": str(len(updates) + len(confirmed)), "note": "款補到新規格"})
+    # 卡片依機型合併（螢幕選配列在同一張卡片內）
+    for k in ("new_panels", "updates", "confirmed", "rumor_panels"):
+        ctx[k + "_flat"] = ctx[k]
+        ctx[k] = group_by_model(ctx[k])
+    ctx["panel_known"] = sum(1 for c in ctx["new_panels"] if c["panel_known"])
+    if ctx["kpis"]:
+        ctx["kpis"][0] = {"label": "新機型", "value": str(len(ctx["new_panels"])),
+                          "note": f"共 {len(new_panels)} 種螢幕選配"}
+        if ctx["new_panels"]:  # 完整度以每款機型資料最完整的選配計算，與卡片一致
+            avg = sum(c["score_pct"] for c in ctx["new_panels"]) / len(ctx["new_panels"])
+            for k in ctx["kpis"]:
+                if k["label"] == "平均規格完整度":
+                    k["value"] = f"{avg:.0f}%"
+    ctx["kpis"].append({"label": "規格更新", "value": str(len(ctx["updates"]) + len(ctx["confirmed"])), "note": "款補到新規格"})
     ctx["ongoing"] = ongoing(db, cfg, ctx)
     ctx["weekly"] = weekly
     ctx["title"] = "筆電顯示器情報週報" if weekly else "筆電顯示器情報日報"
@@ -180,7 +214,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
     ctx["trend"] = weekly_trend(db) if (weekly or today.weekday() == 0) else None
     n_rumor = len(rumor_panels) + len(ctx["platform_rumors"]) + len(ctx["fab_rumors"])
     ctx["subject"] = (f"{cfg['report'].get('subject_prefix', '[顯示器情報]')} {ctx['date']}｜"
-                      f"新機 {len(new_panels)}・更新 {len(updates)}・平台 {len(ctx['platform'])}・"
+                      f"新機 {len(ctx['new_panels'])}・更新 {len(ctx['updates'])}・平台 {len(ctx['platform'])}・"
                       f"產線 {len(ctx['fabs'])}・傳聞 {n_rumor}")
     return ctx
 
@@ -291,7 +325,8 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
     ws = wb.active
     ws.title = f"{ctx.get('period_label', '今日')}新增與更新"
     rows = []
-    for kind, items in [("新機", ctx["new_panels"]), ("更新", ctx["updates"]), ("傳聞證實", ctx["confirmed"]), ("傳聞", ctx["rumor_panels"])]:
+    for kind, items in [("新機", ctx.get("new_panels_flat", ctx["new_panels"])), ("更新", ctx.get("updates_flat", ctx["updates"])),
+                        ("傳聞證實", ctx.get("confirmed_flat", ctx["confirmed"])), ("傳聞", ctx.get("rumor_panels_flat", ctx["rumor_panels"]))]:
         for r in items:
             s, rec = r["spec"], r["record"]
             rows.append([kind, r["confidence"]] + [_fmt(s.get(f)) for f in fields]
