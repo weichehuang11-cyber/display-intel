@@ -190,8 +190,12 @@ def all_sources(cfg: dict) -> list[dict]:
     return list(cfg["sources"].get("rss", [])) + google_news_urls(cfg)
 
 
-def collect(cfg: dict, now: datetime | None = None) -> tuple[list[RawArticle], dict[str, int]]:
-    """抓取所有來源、初篩、去除重複網址、補抓全文。回傳（文章, 各來源抓取數）。"""
+def collect(cfg: dict, now: datetime | None = None, errors: dict | None = None) -> tuple[list[RawArticle], dict[str, int]]:
+    """抓取所有來源、初篩、去除重複網址、補抓全文。回傳（文章, 各來源抓取數）。
+
+    errors：傳入 dict 時，會填入「來源名稱 → 失敗原因」，存進執行紀錄方便排查。
+    """
+    errors = {} if errors is None else errors
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(hours=cfg["schedule"].get("lookback_hours", 26))
     stats: dict[str, int] = {}
@@ -209,6 +213,7 @@ def collect(cfg: dict, now: datetime | None = None) -> tuple[list[RawArticle], d
                 stats[src["name"]] = stats.get(src["name"], 0) + len(items)
                 if exc:
                     log.warning("來源失敗 %s：%s", src["name"], exc)
+                    errors[src["name"]] = f"{type(exc).__name__}：{str(exc)[:160]}"
                 articles.extend(items)
 
         tav = _tavily(client, cfg)

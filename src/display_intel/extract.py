@@ -14,7 +14,7 @@ from typing import Callable
 from pydantic import ValidationError
 
 from .derive import clean_spec
-from .llm import LLM, BudgetExceeded
+from .llm import LLM, BudgetExceeded, OutputTruncated
 from .schema import Extraction, PanelFab, PanelSpec, PlatformTech, RawArticle
 
 log = logging.getLogger(__name__)
@@ -129,8 +129,13 @@ def extract_all(articles: list[RawArticle], llm: LLM, llm_cfg: dict,
     batches = make_batches(articles, llm_cfg.get("max_chars_per_call", 6000), llm_cfg.get("max_chars_per_article", 2500))
     results = []
     processed: list[RawArticle] = []
-    stats = {"batches": len(batches), "done_batches": 0, "failed_batches": 0, "stopped": "", "processed": processed}
-    for bi, batch in enumerate(batches, 1):
+    stats = {"batches": len(batches), "done_batches": 0, "failed_batches": 0, "split_batches": 0,
+             "stopped": "", "errors": [], "processed": processed}
+    queue = list(batches)
+    bi = 0
+    while queue:
+        batch = queue.pop(0)
+        bi += 1
         if should_stop():
             stats["stopped"] = "已到收工時間"
             break
@@ -141,8 +146,18 @@ def extract_all(articles: list[RawArticle], llm: LLM, llm_cfg: dict,
             log.warning("停止萃取：%s", exc)
             break
         except Exception as exc:
+            msg = f"{type(exc).__name__}：{str(exc)[:300]}"
+            if len(stats["errors"]) < 8:
+                stats["errors"].append(msg)
+            # 輸出太長或 JSON 壞掉時，把這批拆成兩半重試（拆到剩一篇為止）
+            if len(batch) > 1 and isinstance(exc, (OutputTruncated, ValueError)):
+                half = len(batch) // 2
+                queue[:0] = [batch[:half], batch[half:]]
+                stats["split_batches"] += 1
+                log.warning("第 %d 批輸出過長或格式錯誤，拆成兩批重試：%s", bi, msg)
+                continue
             stats["failed_batches"] += 1
-            log.warning("第 %d 批萃取失敗：%s", bi, exc)
+            log.warning("第 %d 批萃取失敗：%s", bi, msg)
             continue
         stats["done_batches"] += 1
         processed.extend(batch)
@@ -158,6 +173,6 @@ def extract_all(articles: list[RawArticle], llm: LLM, llm_cfg: dict,
                 continue
             ex, flags = postprocess(batch[idx], ex)
             results.append((batch[idx], ex, flags))
-        log.info("萃取進度 %d/%d 批（%s）", bi, len(batches), datetime.now().strftime("%H:%M"))
+        log.info("萃取進度：已完成 %d 批，剩 %d 批（%s）", stats["done_batches"], len(queue), datetime.now().strftime("%H:%M"))
     stats["articles_with_findings"] = len(results)
     return results, stats

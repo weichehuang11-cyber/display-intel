@@ -43,8 +43,10 @@ def cmd_collect(cfg: dict, args) -> int:
     db = DB(cfg["report"]["database"])
     stats: dict = {}
     try:
-        articles, src_stats = collect(cfg)
+        src_errors: dict = {}
+        articles, src_stats = collect(cfg, errors=src_errors)
         stats["sources"] = src_stats
+        stats["source_errors"] = src_errors
         stats["after_keyword_filter"] = len(articles)
         articles = verify.dedupe_articles(articles, db)
         stats["after_dedupe"] = len(articles)
@@ -58,7 +60,10 @@ def cmd_collect(cfg: dict, args) -> int:
         stop_active = datetime.now(tz) < deadline
         should_stop = lambda: stop_active and datetime.now(tz) >= deadline
 
-        llm = LLM.from_config(cfg["llm"])
+        llm = _working_llm(cfg, stats)
+        if llm is None:
+            log.error("AI 無法使用，今天跳過萃取。原因：%s", stats["llm_probe"])
+            return 1
         results, ex_stats = extract_all(articles, llm, cfg["llm"], should_stop)
         processed = ex_stats.pop("processed")
         stats["extract"] = ex_stats | {"llm_calls": llm.calls}
@@ -73,12 +78,42 @@ def cmd_collect(cfg: dict, args) -> int:
         _print_stats(stats)
 
 
+def _working_llm(cfg: dict, stats: dict):
+    """先用極短請求測試 AI；設定的模型不能用時，依序試 fallback_models。"""
+    from .llm import LLM
+    llm_cfg = dict(cfg["llm"])
+    candidates = [llm_cfg["extract_model"]] + [m for m in llm_cfg.get("fallback_models", []) if m != llm_cfg["extract_model"]]
+    probes = {}
+    for model in candidates:
+        llm_cfg["extract_model"] = model
+        try:
+            llm = LLM.from_config(llm_cfg)
+        except Exception as exc:
+            probes[model] = f"{type(exc).__name__}：{exc}"
+            break  # 金鑰缺失之類的問題，換模型也沒用
+        result = llm.probe()
+        probes[model] = result
+        log.info("AI 測試 %s：%s", model, result)
+        if result == "ok":
+            stats["llm_probe"] = probes
+            stats["llm_model"] = model
+            if model != cfg["llm"]["extract_model"]:
+                log.warning("設定的模型 %s 無法使用，改用 %s。建議到 config.yaml 更新 extract_model", cfg["llm"]["extract_model"], model)
+            return llm
+        if "BudgetExceeded" in result:
+            break
+    stats["llm_probe"] = probes
+    return None
+
+
 def _print_stats(stats: dict):
     src = stats.get("sources", {})
     if src:
         zero = [k for k, v in src.items() if v == 0]
         log.info("來源統計：共 %d 個，%d 個今天沒抓到文章%s", len(src), len(zero), f"（{', '.join(zero[:8])}）" if zero else "")
-    for k in ("after_keyword_filter", "after_dedupe", "extract", "ingest"):
+    for name, err in stats.get("source_errors", {}).items():
+        log.info("來源失敗：%s → %s", name, err)
+    for k in ("llm_probe", "after_keyword_filter", "after_dedupe", "extract", "ingest"):
         if k in stats:
             log.info("%s：%s", k, stats[k])
 

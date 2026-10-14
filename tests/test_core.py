@@ -217,3 +217,26 @@ def test_budget_limit(monkeypatch):
     llm.complete_json("s", "u")
     with pytest.raises(BudgetExceeded):
         llm.complete_json("s", "u")
+
+
+def test_extract_splits_batch_on_truncation():
+    from display_intel.llm import OutputTruncated
+    arts = [art(f"Acme Foo {i} laptop OLED", f"Acme Foo {i} has a 14-inch OLED panel.") for i in range(2)]
+    ok = {"results": [{"article_id": 1, "relevant": True, "panels": [
+        {"brand": "Acme", "model": "Foo", "panel_tech": "OLED", "evidence": {"panel_tech": "OLED panel"}}]}]}
+    llm = FakeLLM([OutputTruncated("太長"), ok, ok])
+    results, stats = extract_all(arts, llm, {"max_chars_per_call": 10000})
+    assert stats["split_batches"] == 1 and stats["done_batches"] == 2
+    assert len(results) == 2 and llm.calls == 3
+    assert stats["errors"]
+
+
+def test_working_llm_falls_back(monkeypatch):
+    from display_intel import __main__ as main
+    from display_intel.llm import LLM
+    monkeypatch.setenv("GITHUB_TOKEN", "fake")
+    monkeypatch.setattr(LLM, "probe", lambda self: "ok" if self.model == "good" else "HTTPStatusError：404 unknown model")
+    stats = {}
+    llm = main._working_llm({"llm": {"provider": "github_models", "extract_model": "bad", "fallback_models": ["good"]}}, stats)
+    assert llm.model == "good" and stats["llm_model"] == "good"
+    assert "404" in stats["llm_probe"]["bad"]

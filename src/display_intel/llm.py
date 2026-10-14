@@ -31,6 +31,10 @@ class BudgetExceeded(RuntimeError):
     """今天的呼叫次數用完了（設定上限或免費額度）。"""
 
 
+class OutputTruncated(RuntimeError):
+    """模型輸出超過長度上限被截斷（一次送太多文章），呼叫端應拆小批次重試。"""
+
+
 def parse_json(text: str) -> dict:
     """容忍模型在 JSON 外包了 ``` 或多餘文字。"""
     text = text.strip()
@@ -105,12 +109,14 @@ class LLM:
                     time.sleep(10 * (attempt + 1))
                     continue
                 raise
+            except OutputTruncated:
+                raise
             except (ValueError, json.JSONDecodeError) as exc:
                 log.warning("模型回覆不是有效 JSON（第 %d 次）：%s", attempt + 1, exc)
-                if attempt == retries - 1:
+                if attempt >= 1:  # 同樣的請求重試一次就好，避免浪費免費額度
                     raise
             except Exception as exc:  # 網路或 SDK 錯誤
-                if "rate" in str(exc).lower() and attempt < retries - 1:
+                if "ratelimit" in type(exc).__name__.lower() and attempt < retries - 1:
                     time.sleep(30 * (attempt + 1))
                     continue
                 raise
@@ -124,12 +130,30 @@ class LLM:
             "temperature": 0,
             "max_tokens": self.max_output_tokens,
         })
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        if r.status_code >= 400:
+            # 把伺服器的錯誤說明帶進訊息，方便除錯
+            raise httpx.HTTPStatusError(f"{r.status_code}：{r.text[:400]}", request=r.request, response=r)
+        choice = r.json()["choices"][0]
+        content = (choice.get("message") or {}).get("content") or ""
+        if choice.get("finish_reason") == "length":
+            raise OutputTruncated("模型輸出被截斷")
+        if not content:
+            raise ValueError(f"模型沒有回覆內容（finish_reason={choice.get('finish_reason')}）")
+        return content
 
     def _anthropic(self, system: str, user: str) -> str:
         msg = self._client.messages.create(
             model=self.model, max_tokens=self.max_output_tokens, system=system,
             messages=[{"role": "user", "content": user}],
         )
+        if getattr(msg, "stop_reason", "") == "max_tokens":
+            raise OutputTruncated("模型輸出被截斷")
         return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+
+    def probe(self) -> str:
+        """執行前先用一個極短的請求確認 AI 可用，回傳 "ok" 或錯誤說明。"""
+        try:
+            data = self.complete_json("只輸出 JSON。", '請回覆 {"ok": true}', retries=2)
+            return "ok" if data.get("ok") else f"回覆異常：{str(data)[:200]}"
+        except Exception as exc:
+            return f"{type(exc).__name__}：{str(exc)[:400]}"

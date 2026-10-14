@@ -15,6 +15,7 @@ llm:
   provider: github_models
   extract_model: openai/gpt-4o-mini
   summary_model: openai/gpt-4o-mini
+  fallback_models: [openai/gpt-4.1-mini, openai/gpt-4.1-nano, openai/gpt-4o]  # 上面的模型不能用時依序嘗試
   max_calls_per_run: 40             # 每天最多呼叫幾次 AI（免費額度內）
   min_seconds_between_calls: 8      # 每次呼叫間隔，避免超過每分鐘上限
   max_chars_per_call: 6000          # 每次送給 AI 的文字量（免費模型輸入長度有限）
