@@ -13,8 +13,10 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
+from . import analytics
 from .db import DB
-from .schema import Confidence
+from .panel_decode import canonical_maker
+from .schema import Confidence, PanelRecord, PanelSpec
 
 log = logging.getLogger(__name__)
 
@@ -49,45 +51,82 @@ def _fmt(v) -> str:
     return str(v)
 
 
-def panel_row(ev: dict) -> dict:
-    rec = ev["payload"]["record"]
-    s = rec["spec"]
-    res = f"{s['res_w']}×{s['res_h']}" if s.get("res_w") and s.get("res_h") else ""
-    brightness = " / ".join(x for x in [
-        f"{_fmt(s.get('sdr_nits'))} nits" if s.get("sdr_nits") else "",
-        f"HDR {_fmt(s.get('hdr_peak_nits'))}" if s.get("hdr_peak_nits") else ""] if x)
-    color = "、".join(x for x in [
-        f"DCI-P3 {_fmt(s.get('dci_p3_pct'))}%" if s.get("dci_p3_pct") else "",
-        f"sRGB {_fmt(s.get('srgb_pct'))}%" if s.get("srgb_pct") else ""] if x)
-    panel_src = " ".join(x for x in [s.get("panel_maker") or "", s.get("panel_model") or ""] if x)
-    extras = "、".join(x for x in [
-        _fmt(s.get("vrr_tech")), f"{_fmt(s.get('mini_led_zones'))} 區" if s.get("mini_led_zones") else "",
-        _fmt(s.get("dimming")), f"PWM {_fmt(s.get('pwm_hz'))}Hz" if s.get("pwm_hz") else "",
-        _fmt(s.get("low_power_tech")), _fmt(s.get("certifications"))] if x)
-    changes = ev["payload"].get("changes") or {}
-    change_text = "；".join(f"{FIELD_LABELS.get(k, k)}：{_fmt(o) or '—'} → {_fmt(n)}" for k, (o, n) in changes.items())
+def _current_record(db: DB, ev: dict) -> PanelRecord:
+    """事件裡存的是當時的快照；報告改用資料庫中最新、已合併的紀錄。"""
+    snap = ev["payload"]["record"]
+    rec = db.get_panel(snap["key"])
+    if rec is None:
+        from .verify import find_existing
+        rec = find_existing(db, PanelSpec(**snap["spec"]))
+    return rec or PanelRecord.model_validate(snap)
+
+
+def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | None = None) -> dict:
+    s = rec.spec
+    if s.size_inch:
+        size = f'{s.size_inch:g}"'
+    elif rec.size_inferred:
+        size = f'{rec.size_inferred:g}"（推算）'
+    else:
+        size = ""
+    screen = "・".join(x for x in [size, s.panel_tech or "", f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else "",
+                                   f"{s.refresh_hz:g}Hz" if s.refresh_hz else ""] if x)
+    bright = "・".join(x for x in [f"SDR {s.sdr_nits:g} nits" if s.sdr_nits else "",
+                                   f"HDR {s.hdr_peak_nits:g} nits" if s.hdr_peak_nits else "",
+                                   f"DCI-P3 {s.dci_p3_pct:g}%" if s.dci_p3_pct else "",
+                                   f"sRGB {s.srgb_pct:g}%" if s.srgb_pct else "",
+                                   f"ΔE {s.delta_e:g}" if s.delta_e else ""] if x)
+    maker = rec.maker
+    maker_txt = (f"{maker}（由型號推算）" if rec.panel_maker_inferred else maker) if maker else ""
+    panel = " ".join(x for x in [maker_txt, s.panel_model or ""] if x)
+    extras = "・".join(x for x in [
+        _fmt(s.vrr_tech), f"Mini LED {s.mini_led_zones} 區" if s.mini_led_zones else "",
+        f"{s.dimming} 調光" if s.dimming else "", f"PWM {s.pwm_hz:g}Hz" if s.pwm_hz else "",
+        _fmt(s.low_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),
+        "觸控" if s.touch else "", s.surface or ""] if x)
+    derived = "・".join(x for x in [f"{rec.ppi:g} PPI" if rec.ppi else "", rec.aspect_ratio or "",
+                                    f"像素密度{rec.density_class}" if rec.density_class else ""] if x)
+    change_text = "；".join(f"{FIELD_LABELS.get(k, k)}：{_fmt(o) or '—'} → {_fmt(n)}" for k, (o, n) in (changes or {}).items())
     return {
-        "brand": s.get("brand") or "", "model": s.get("model") or "",
-        "size": f"{_fmt(s.get('size_inch'))}\"" if s.get("size_inch") else "",
-        "tech": s.get("panel_tech") or "", "res": res,
-        "refresh": f"{_fmt(s.get('refresh_hz'))}Hz" if s.get("refresh_hz") else "",
-        "brightness": brightness, "color": color, "panel_src": panel_src or "待確認",
-        "ppi": f"{rec['ppi']:g}" if rec.get("ppi") else "", "density": rec.get("density_class") or "",
-        "aspect": rec.get("aspect_ratio") or "", "extras": extras,
-        "confidence": Confidence(ev["confidence"]).label if ev.get("confidence") else "",
-        "conf_code": ev.get("confidence") or "",
-        "source_name": ev.get("source_name") or "", "source_url": ev.get("source_url") or "",
-        "changes": change_text, "spec": s, "record": rec,
+        "key": rec.key, "rec": rec, "brand": s.brand or "", "model": s.model or "",
+        "screen": screen, "bright": bright, "panel": panel or "面板來源待確認", "panel_known": bool(panel),
+        "extras": extras, "derived": derived, "tags": tags or [],
+        "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
+        "source_name": rec.source_name, "source_url": rec.source_url, "changes": change_text,
+        "spec": s.model_dump(), "record": rec.model_dump(mode="json"),
+        # 舊欄位（AI 摘要與 Excel 使用）
+        "size": size, "tech": s.panel_tech or "", "res": f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else "",
+        "refresh": f"{s.refresh_hz:g}Hz" if s.refresh_hz else "", "panel_src": panel or "待確認",
     }
 
 
 def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dict:
-    panels = [e for e in events if e["category"] == "panel"]
-    is_rumor = lambda e: e.get("confidence") == "D"
-    new_panels = [panel_row(e) for e in panels if e["kind"] == "new" and not is_rumor(e)]
-    updates = [panel_row(e) for e in panels if e["kind"] == "updated" and not is_rumor(e)]
-    confirmed = [panel_row(e) for e in panels if e["kind"] == "rumor_confirmed"]
-    rumor_panels = [panel_row(e) for e in panels if is_rumor(e)]
+    weekly = (cfg.get("schedule") or {}).get("cadence", "daily") == "weekly"
+    period_start = (today - timedelta(days=7 if weekly else 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 同一款機型在本期可能有多個事件（新增後又補規格），合併成一張卡片
+    priority = {"rumor_confirmed": 3, "new": 2, "updated": 1}
+    grouped: dict[str, dict] = {}
+    for e in (e for e in events if e["category"] == "panel"):
+        rec = _current_record(db, e)
+        g = grouped.setdefault(rec.key, {"rec": rec, "kind": e["kind"], "changes": {}})
+        if priority.get(e["kind"], 0) > priority.get(g["kind"], 0):
+            g["kind"] = e["kind"]
+        g["changes"].update(e["payload"].get("changes") or {})
+    all_records = db.all_panels()
+    period_new = [{"rec": g["rec"]} for g in grouped.values() if g["kind"] == "new" and g["rec"].confidence != Confidence.D]
+    standout_lines, tags = analytics.standouts(period_new, all_records, period_start)
+
+    def card(g):
+        return panel_card(g["rec"], g["changes"] if g["kind"] != "new" else None, tags.get(g["rec"].key))
+
+    by_name = lambda c: (c["brand"].lower(), c["model"].lower())
+    is_rumor = lambda g: g["rec"].confidence == Confidence.D
+    new_panels = sorted((card(g) for g in grouped.values() if g["kind"] == "new" and not is_rumor(g)), key=by_name)
+    updates = sorted((card(g) for g in grouped.values() if g["kind"] == "updated" and not is_rumor(g)), key=by_name)
+    confirmed = sorted((card(g) for g in grouped.values() if g["kind"] == "rumor_confirmed"), key=by_name)
+    rumor_panels = sorted((card(g) for g in grouped.values() if is_rumor(g)), key=by_name)
+    ev_rumor = lambda e: e.get("confidence") == "D"
 
     platform = [e for e in events if e["category"] == "platform"]
     platform_rows = sorted(
@@ -95,15 +134,16 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
           "category": PLATFORM_CATEGORY.get(e["payload"]["category"], ""),
           "summary": e["payload"]["summary"], "affected": "、".join(FIELD_LABELS.get(x, x) for x in e["payload"].get("affected_specs", [])),
           "confidence": Confidence(e["confidence"]).label if e.get("confidence") else "",
-          "source_name": e["source_name"], "source_url": e["source_url"], "rumor": is_rumor(e) or e["kind"] == "rumor"}
+          "conf_code": e.get("confidence") or "C",
+          "source_name": e["source_name"], "source_url": e["source_url"], "rumor": ev_rumor(e) or e["kind"] == "rumor"}
          for e in platform],
         key=lambda r: VENDOR_ORDER.index(r["vendor"]) if r["vendor"] in VENDOR_ORDER else 99)
-    fab_rows = [{"maker": e["payload"]["maker"], "site": e["payload"].get("fab_site") or "",
+    fab_rows = [{"maker": canonical_maker(e["payload"]["maker"]), "site": e["payload"].get("fab_site") or "",
                  "gen": e["payload"].get("generation") or "", "tech": e["payload"].get("technology") or "",
                  "status": FAB_STATUS.get(e["kind"], e["kind"]), "milestone": e["payload"].get("milestone") or "",
                  "capacity": e["payload"].get("capacity_sheets_per_month"),
                  "summary": e["payload"]["summary"], "confidence": Confidence(e["confidence"]).label if e.get("confidence") else "",
-                 "source_name": e["source_name"], "source_url": e["source_url"], "rumor": is_rumor(e)}
+                 "source_name": e["source_name"], "source_url": e["source_url"], "rumor": ev_rumor(e)}
                 for e in events if e["category"] == "fab"]
     industry = [{"note": e["payload"]["note"], "source_name": e["source_name"], "source_url": e["source_url"]}
                 for e in events if e["category"] == "industry"]
@@ -116,15 +156,21 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "platform_rumors": [r for r in platform_rows if r["rumor"]],
         "fabs": [r for r in fab_rows if not r["rumor"]], "fab_rumors": [r for r in fab_rows if r["rumor"]],
         "industry": industry,
+        "kpis": analytics.kpis(new_panels),
+        "standouts": standout_lines,
+        "wow": analytics.week_over_week(all_records, period_start, 7 if weekly else 1),
+        "mentions": analytics.tech_mentions(all_records, period_start),
+        "matrix": analytics.brand_maker_matrix(all_records),
+        "rumor_tracker": analytics.rumor_tracker(all_records, today),
+        "panel_known": sum(1 for c in new_panels if c["panel_known"]),
     }
     ctx["ongoing"] = ongoing(db, cfg, ctx)
-    weekly = (cfg.get("schedule") or {}).get("cadence", "daily") == "weekly"
     ctx["weekly"] = weekly
     ctx["title"] = "筆電顯示器情報週報" if weekly else "筆電顯示器情報日報"
     ctx["period_label"] = "本週" if weekly else "今日"
+    ctx["prev_label"] = "上週" if weekly else "昨日"
     if weekly:
-        start = (today - timedelta(days=6)).strftime("%m/%d")
-        ctx["period"] = f"資料期間：{start}–{today.strftime('%m/%d')}（過去 7 天）"
+        ctx["period"] = f"資料期間：{(today - timedelta(days=6)).strftime('%m/%d')}–{today.strftime('%m/%d')}（過去 7 天）"
     else:
         ctx["period"] = "資料期間：前一日報告後至今"
     ctx["trend"] = weekly_trend(db) if (weekly or today.weekday() == 0) else None
@@ -171,7 +217,7 @@ def weekly_trend(db: DB) -> dict | None:
     tech = Counter("OLED" if r.spec.panel_tech and "oled" in r.spec.panel_tech.lower() else
                    ("LCD" if r.spec.panel_tech else "未知") for r in recs)
     refresh = Counter(f"{r.spec.refresh_hz:g}Hz" for r in recs if r.spec.refresh_hz)
-    makers = Counter(r.spec.panel_maker for r in recs if r.spec.panel_maker)
+    makers = Counter(r.maker for r in recs if r.maker)
     return {"count": len(recs), "tech": tech.most_common(), "refresh": refresh.most_common(5),
             "makers": makers.most_common(5)}
 
@@ -185,12 +231,16 @@ def highlights(ctx: dict, llm=None) -> list[str]:
         "平台": [f"{r['vendor']} {r['tech']}：{r['summary']}" for r in ctx["platform"][:10]],
         "產線": [f"{r['maker']} {r['gen']} {r['status']}：{r['summary']}" for r in ctx["fabs"][:10]],
         "傳聞": [f"{r['brand']} {r['model']} {r['tech']} {r['refresh']}" for r in ctx["rumor_panels"][:10]],
+        "關鍵數字": [f"{k['label']}：{k['value']}（{k['note']}）" for k in ctx.get("kpis", [])],
+        "亮點": ctx.get("standouts", []),
+        "與上期比較": [f"{w['metric']}：{w['prev']} → {w['now']}" for w in (ctx.get("wow") or [])],
     }
     if llm is not None and any(facts.values()):
         try:
             data = llm.complete_json(
                 f"你是筆電顯示器市場分析師。根據提供的{ctx.get('period_label', '今日')}資料，用繁體中文寫 3 到 5 句重點，最重要的放第一句。"
                 "只能使用提供的資料，不可加入資料以外的資訊。傳聞必須註明是傳聞。"
+                "最後一句寫一個值得關注的市場或技術觀察（例如哪類規格變多、哪家面板廠出現較多），但仍只能根據資料。"
                 '只輸出 JSON：{"highlights": ["...", "..."]}',
                 json.dumps(facts, ensure_ascii=False))
             hl = [h for h in data.get("highlights", []) if isinstance(h, str) and h.strip()]
@@ -243,13 +293,26 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
             rows.append([kind, r["confidence"]] + [_fmt(s.get(f)) for f in fields]
                         + [rec.get("ppi"), rec.get("aspect_ratio"), rec.get("density_class"), r["changes"], r["source_name"], r["source_url"]])
     sheet(ws, ["類型", "可信度"] + [FIELD_LABELS[f] for f in fields] + ["PPI", "長寬比", "像素密度", "變更", "來源", "網址"], rows)
+    ws.auto_filter.ref = ws.dimensions
 
     ws2 = wb.create_sheet("全部面板紀錄")
-    sheet(ws2, ["可信度"] + [FIELD_LABELS[f] for f in fields] + ["PPI", "長寬比", "像素密度", "首次出現", "最後更新", "來源", "網址", "查核標記"],
+    sheet(ws2, ["可信度"] + [FIELD_LABELS[f] for f in fields]
+          + ["面板廠（含推算）", "PPI", "長寬比", "像素密度", "首次出現", "最後更新", "來源", "網址", "查核標記"],
           [[rec.confidence.label] + [_fmt(getattr(rec.spec, f)) for f in fields]
-           + [rec.ppi, rec.aspect_ratio, rec.density_class, rec.first_seen.strftime("%Y-%m-%d"),
+           + [(f"{rec.maker}（推算）" if rec.panel_maker_inferred else rec.maker) or "",
+              rec.ppi, rec.aspect_ratio, rec.density_class, rec.first_seen.strftime("%Y-%m-%d"),
               rec.last_updated.strftime("%Y-%m-%d"), rec.source_name, rec.source_url, "；".join(rec.flags)]
            for rec in db.all_panels()])
+    ws2.auto_filter.ref = ws2.dimensions
+
+    m = ctx.get("matrix")
+    if m:
+        ws4 = wb.create_sheet("品牌×面板廠")
+        sheet(ws4, ["品牌"] + m["makers"], [[r["brand"]] + r["cells"] for r in m["rows"]])
+    if ctx.get("mentions"):
+        ws5 = wb.create_sheet("技術提及率")
+        sheet(ws5, ["技術", "說明", f"{ctx.get('period_label', '本期')}款數", f"{ctx.get('period_label', '本期')}提及率", "前 30 天提及率"],
+              [[r["feature"], r["desc"], r["count"], r["share"], r["base_share"]] for r in ctx["mentions"]])
 
     ws3 = wb.create_sheet("平台與產線")
     sheet(ws3, ["類別", "廠商", "項目", "分類／狀態", "摘要", "可信度", "來源", "網址"],
@@ -269,6 +332,9 @@ def build_report(db: DB, cfg: dict, llm=None) -> tuple[dict, str, Path, list[int
     events = db.unreported_events()
     ctx = build_context(events, db, cfg, today)
     ctx["highlights"] = highlights(ctx, llm)
+    ctx["glossary"] = []
+    html = render_html(ctx)
+    ctx["glossary"] = analytics.glossary_for(html)
     html = render_html(ctx)
     out = Path(cfg["report"]["output_dir"])
     out.mkdir(parents=True, exist_ok=True)

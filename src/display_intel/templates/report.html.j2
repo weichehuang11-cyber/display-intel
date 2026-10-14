@@ -1,81 +1,168 @@
-{%- macro src(r) -%}{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1f5fa8;text-decoration:none;">{{ r.source_name or "來源" }}</a>{% endif %}{%- endmacro -%}
+{#- 郵件用 HTML：只用 inline style 與 table，Gmail／Outlook／手機都能正常顯示 -#}
+{%- macro src(r) -%}{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1f5fa8;text-decoration:none;">{{ r.source_name or "來源" }} ›</a>{% endif %}{%- endmacro -%}
 {%- macro badge(code, label) -%}
-{%- set colors = {"A": "#1e7d4f", "B": "#2f6fb0", "C": "#6b6b6b", "D": "#b4580a", "E": "#999"} -%}
-<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;color:#fff;background:{{ colors.get(code, '#6b6b6b') }};">{{ label }}</span>
+{%- set colors = {"A": "#1e7d4f", "B": "#2f6fb0", "C": "#6b6b6b", "D": "#b4580a", "E": "#999999"} -%}
+<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;line-height:18px;color:#fff;background:{{ colors.get(code, '#6b6b6b') }};">{{ label }}</span>
 {%- endmacro -%}
-{%- macro panel_table(rows, show_changes=False) -%}
-<table cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:13px;">
-  <tr style="background:#eef2f7;text-align:left;">
-    <th>機型</th><th>螢幕</th><th>亮度／色域</th><th>面板來源</th><th>{% if show_changes %}變更{% else %}其他{% endif %}</th><th>來源</th>
-  </tr>
-  {% for r in rows %}
-  <tr style="border-top:1px solid #e3e6ea;vertical-align:top;">
-    <td><b>{{ r.brand }}</b><br>{{ r.model }}</td>
-    <td>{{ r.size }} {{ r.tech }}<br>{{ r.res }} {{ r.refresh }}{% if r.ppi %}<br><span style="color:#777;">{{ r.ppi }} PPI・{{ r.aspect }}・{{ r.density }}</span>{% endif %}</td>
-    <td>{{ r.brightness }}{% if r.color %}<br>{{ r.color }}{% endif %}</td>
-    <td>{{ r.panel_src }}</td>
-    <td>{% if show_changes %}{{ r.changes }}{% else %}{{ r.extras }}{% endif %}</td>
-    <td>{{ badge(r.conf_code, r.confidence) }}<br>{{ src(r) }}</td>
-  </tr>
-  {% endfor %}
-</table>
+{%- macro tagchip(t) -%}<span style="display:inline-block;padding:1px 7px;margin:2px 4px 0 0;border-radius:10px;font-size:11px;line-height:18px;color:#7a4b00;background:#fff1d6;">★ {{ t }}</span>{%- endmacro -%}
+{%- macro h2(text, color="#1f5fa8") -%}<h2 style="font-size:17px;margin:28px 0 10px;padding-left:10px;border-left:4px solid {{ color }};">{{ text }}</h2>{%- endmacro -%}
+{%- macro card(c, show_changes=False) -%}
+<div style="border:1px solid #e3e6ea;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff;">
+  <div style="font-size:15px;font-weight:bold;line-height:1.4;">{{ c.brand }} {{ c.model }}</div>
+  <div style="margin:4px 0 6px;">{{ badge(c.conf_code, c.confidence) }} {% for t in c.tags %}{{ tagchip(t) }}{% endfor %}</div>
+  {% if c.screen %}<div style="font-size:14px;line-height:1.6;">🖥 {{ c.screen }}</div>{% endif %}
+  {% if c.bright %}<div style="font-size:14px;line-height:1.6;">☀ {{ c.bright }}</div>{% endif %}
+  <div style="font-size:14px;line-height:1.6;{% if not c.panel_known %}color:#999;{% endif %}">🏭 {{ c.panel }}</div>
+  {% if c.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ c.extras }}</div>{% endif %}
+  {% if c.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ c.derived }}</div>{% endif %}
+  {% if show_changes and c.changes %}<div style="font-size:13px;line-height:1.6;color:#1e7d4f;margin-top:4px;">更新：{{ c.changes }}</div>{% endif %}
+  <div style="font-size:12px;margin-top:6px;">{{ src(c) }}</div>
+</div>
 {%- endmacro -%}
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ subject }}</title></head>
-<body style="margin:0;padding:0;background:#f5f6f8;font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;color:#222;">
-<div style="max-width:880px;margin:0 auto;padding:20px 16px;background:#fff;">
+<body style="margin:0;padding:0;background:#f2f4f7;font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;color:#222;">
+<div style="max-width:720px;margin:0 auto;padding:20px 14px;background:#f7f8fa;">
 
-  <h1 style="font-size:20px;margin:0 0 4px;">{{ title }}</h1>
-  <div style="color:#777;font-size:13px;margin-bottom:16px;">{{ date }}（週{{ weekday }}）・{{ period }}</div>
+  <div style="font-size:21px;font-weight:bold;margin:0 0 2px;">{{ title }}</div>
+  <div style="color:#777;font-size:13px;margin-bottom:14px;">{{ date }}（週{{ weekday }}）・{{ period }}</div>
 
-  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">{{ period_label }}重點</h2>
-  <ul style="font-size:14px;line-height:1.7;padding-left:20px;">
+  {#- 關鍵數字：2 欄 × 2 列，手機也排得下 -#}
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:separate;border-spacing:6px;">
+    {% for row in kpis|batch(2) %}
+    <tr>
+      {% for k in row %}
+      <td width="50%" style="background:#fff;border:1px solid #e3e6ea;border-radius:10px;padding:10px 12px;vertical-align:top;">
+        <div style="font-size:12px;color:#777;">{{ k.label }}</div>
+        <div style="font-size:22px;font-weight:bold;line-height:1.3;">{{ k.value }}</div>
+        <div style="font-size:11px;color:#999;">{{ k.note }}</div>
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+
+  {{ h2(period_label ~ "重點") }}
+  <ul style="font-size:14px;line-height:1.75;padding-left:20px;margin:0;">
     {% for h in highlights %}<li>{{ h }}</li>{% endfor %}
   </ul>
 
+  {% if standouts %}
+  {{ h2("亮點", "#d08a00") }}
+  <ul style="font-size:14px;line-height:1.75;padding-left:20px;margin:0;">
+    {% for s in standouts %}<li>{{ s }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
   {% if new_panels %}
-  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">新機型與新面板（{{ new_panels|length }}）</h2>
-  {{ panel_table(new_panels) }}
+  {{ h2("新機型與新面板（" ~ new_panels|length ~ "）") }}
+  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">{{ panel_known }} 款已知面板來源。🖥 螢幕　☀ 亮度與色彩　🏭 面板廠與型號</div>
+  {% for c in new_panels %}{{ card(c) }}{% endfor %}
   {% endif %}
 
   {% if updates %}
-  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">規格更新（{{ updates|length }}）</h2>
-  {{ panel_table(updates, show_changes=True) }}
+  {{ h2("規格更新（" ~ updates|length ~ "）") }}
+  {% for c in updates %}{{ card(c, True) }}{% endfor %}
+  {% endif %}
+
+  {% if confirmed %}
+  {{ h2("傳聞已證實（" ~ confirmed|length ~ "）", "#1e7d4f") }}
+  {% for c in confirmed %}{{ card(c, True) }}{% endfor %}
   {% endif %}
 
   {% if platform %}
-  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">平台技術動態（{{ platform|length }}）</h2>
+  {{ h2("平台技術動態（" ~ platform|length ~ "）") }}
   {% for r in platform %}
-  <p style="font-size:14px;line-height:1.6;margin:8px 0;"><b>{{ r.vendor }}｜{{ r.tech }}</b> <span style="color:#777;">{{ r.category }}</span><br>
-    {{ r.summary }}{% if r.affected %} <span style="color:#777;">影響規格：{{ r.affected }}</span>{% endif %}<br>{{ badge("A" if r.confidence == "官方" else "C", r.confidence) }} {{ src(r) }}</p>
+  <div style="border:1px solid #e3e6ea;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff;">
+    <div style="font-size:15px;font-weight:bold;">{{ r.vendor }}｜{{ r.tech }}</div>
+    <div style="margin:4px 0;">{{ badge(r.conf_code, r.confidence) }} <span style="font-size:12px;color:#777;">{{ r.category }}</span></div>
+    <div style="font-size:14px;line-height:1.6;">{{ r.summary }}</div>
+    {% if r.affected %}<div style="font-size:12px;color:#777;margin-top:4px;">影響規格：{{ r.affected }}</div>{% endif %}
+    <div style="font-size:12px;margin-top:6px;">{{ src(r) }}</div>
+  </div>
   {% endfor %}
   {% endif %}
 
   {% if fabs or industry %}
-  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">面板廠與產業動態</h2>
+  {{ h2("面板廠與產業動態") }}
   {% for r in fabs %}
-  <p style="font-size:14px;line-height:1.6;margin:8px 0;"><b>{{ r.maker }}</b> {{ r.site }} {{ r.gen }} {{ r.tech }} <span style="color:#777;">［{{ r.status }}{% if r.milestone %}・{{ r.milestone }}{% endif %}{% if r.capacity %}・月產能 {{ "{:,}".format(r.capacity) }} 片{% endif %}］</span><br>
-    {{ r.summary }} {{ src(r) }}</p>
+  <div style="border:1px solid #e3e6ea;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff;">
+    <div style="font-size:15px;font-weight:bold;">{{ r.maker }} {{ r.site }} {{ r.gen }} {{ r.tech }}</div>
+    <div style="font-size:12px;color:#777;margin:4px 0;">狀態：{{ r.status }}{% if r.milestone %}・{{ r.milestone }}{% endif %}{% if r.capacity %}・月產能 {{ "{:,}".format(r.capacity) }} 片{% endif %}</div>
+    <div style="font-size:14px;line-height:1.6;">{{ r.summary }}</div>
+    <div style="font-size:12px;margin-top:6px;">{{ src(r) }}</div>
+  </div>
   {% endfor %}
   {% for r in industry %}
   <p style="font-size:14px;line-height:1.6;margin:8px 0;">・{{ r.note }} {{ src(r) }}</p>
   {% endfor %}
   {% endif %}
 
-  {% if confirmed %}
-  <h2 style="font-size:16px;border-left:4px solid #1e7d4f;padding-left:8px;">傳聞已證實（{{ confirmed|length }}）</h2>
-  {{ panel_table(confirmed) }}
+  {{ h2("市場分析", "#5b3fa8") }}
+  {% if wow %}
+  <div style="font-size:14px;font-weight:bold;margin:4px 0 6px;">與{{ prev_label }}比較</div>
+  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#eef0f6;text-align:left;"><th>指標</th><th>{{ prev_label }}</th><th>{{ period_label }}</th><th>變化</th></tr>
+    {% for w in wow %}
+    <tr style="border-top:1px solid #e3e6ea;"><td>{{ w.metric }}</td><td>{{ w.prev }}</td><td><b>{{ w.now }}</b></td>
+      <td style="color:{% if w.arrow == '▲' %}#1e7d4f{% elif w.arrow == '▼' %}#b42318{% else %}#777{% endif %};">{{ w.arrow }} {{ w.delta }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p style="font-size:13px;color:#888;margin:4px 0;">與{{ prev_label }}比較：資料累積中，下期開始顯示。</p>
   {% endif %}
 
-  {% if rumor_panels or platform_rumors or fab_rumors %}
-  <h2 style="font-size:16px;border-left:4px solid #b4580a;padding-left:8px;">傳聞與爆料（未經證實）</h2>
-  {% if rumor_panels %}{{ panel_table(rumor_panels) }}{% endif %}
+  {% if mentions %}
+  <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">技術提及率</div>
+  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#eef0f6;text-align:left;"><th>技術</th><th>{{ period_label }}</th><th>前 30 天</th></tr>
+    {% for m in mentions %}
+    <tr style="border-top:1px solid #e3e6ea;"><td>{{ m.feature }}<div style="font-size:11px;color:#999;">{{ m.desc }}</div></td><td><b>{{ m.share }}</b>（{{ m.count }} 款）</td><td>{{ m.base_share }}</td></tr>
+    {% endfor %}
+  </table>
+  <div style="font-size:11px;color:#999;margin-top:4px;">提及率＝新機型報導中有提到該技術的比例；報導沒提到不代表沒有。</div>
+  {% endif %}
+
+  {% if matrix %}
+  <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">品牌 × 面板廠（累計 {{ matrix.total }} 款）</div>
+  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#eef0f6;text-align:left;"><th>品牌</th>{% for m in matrix.makers %}<th>{{ m }}</th>{% endfor %}</tr>
+    {% for r in matrix.rows %}
+    <tr style="border-top:1px solid #e3e6ea;"><td>{{ r.brand }}</td>{% for v in r.cells %}<td style="text-align:center;{% if v %}font-weight:bold;{% else %}color:#ccc;{% endif %}">{{ v if v else "·" }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </table>
+  {% if matrix.inferred %}<div style="font-size:11px;color:#999;margin-top:4px;">其中 {{ matrix.inferred }} 款的面板廠由面板型號推算。</div>{% endif %}
+  {% else %}
+  <p style="font-size:13px;color:#888;margin:12px 0 4px;">品牌 × 面板廠：目前報導中提到面板廠的機型還不多，資料累積中。</p>
+  {% endif %}
+
+  {% if trend %}
+  <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">近 30 天分布（{{ trend.count }} 款）</div>
+  <p style="font-size:13px;line-height:1.75;margin:0;">
+    面板技術：{% for k, v in trend.tech %}{{ k }} {{ v }}{% if not loop.last %}、{% endif %}{% endfor %}<br>
+    {% if trend.refresh %}常見刷新率：{% for k, v in trend.refresh %}{{ k }}（{{ v }}）{% if not loop.last %}、{% endif %}{% endfor %}<br>{% endif %}
+    {% if trend.makers %}面板廠：{% for k, v in trend.makers %}{{ k }}（{{ v }}）{% if not loop.last %}、{% endif %}{% endfor %}{% endif %}
+  </p>
+  {% endif %}
+
+  {% if rumor_panels or platform_rumors or fab_rumors or rumor_tracker %}
+  {{ h2("傳聞與爆料（未經證實）", "#b4580a") }}
+  {% for c in rumor_panels %}{{ card(c) }}{% endfor %}
   {% for r in platform_rumors %}<p style="font-size:14px;margin:8px 0;">・<b>{{ r.vendor }} {{ r.tech }}</b>：{{ r.summary }} {{ src(r) }}</p>{% endfor %}
   {% for r in fab_rumors %}<p style="font-size:14px;margin:8px 0;">・<b>{{ r.maker }} {{ r.gen }}</b>：{{ r.summary }} {{ src(r) }}</p>{% endfor %}
+  {% if rumor_tracker %}
+  <div style="font-size:14px;font-weight:bold;margin:12px 0 6px;">傳聞追蹤（近 90 天尚未證實）</div>
+  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#fdf3e7;text-align:left;"><th>傳聞</th><th>首次出現</th><th>已過</th></tr>
+    {% for t in rumor_tracker %}
+    <tr style="border-top:1px solid #e3e6ea;"><td>{% if t.source_url %}<a href="{{ t.source_url }}" style="color:#1f5fa8;text-decoration:none;">{{ t.name }}</a>{% else %}{{ t.name }}{% endif %}<div style="font-size:11px;color:#999;">{{ t.detail }}</div></td><td>{{ t.first_seen }}</td><td>{{ t.days }} 天</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
   {% endif %}
 
   {% if ongoing %}
-  <h2 style="font-size:16px;border-left:4px solid #999;padding-left:8px;">持續討論中</h2>
+  {{ h2("持續討論中", "#999") }}
   {% for group in ongoing %}
   <p style="font-size:14px;margin:8px 0 4px;"><b>{{ group.label }}</b>（{{ period_label }}無新消息）</p>
   {% if group.entries %}
@@ -86,20 +173,18 @@
   {% endfor %}
   {% endif %}
 
-  {% if trend %}
-  <h2 style="font-size:16px;border-left:4px solid #1f5fa8;padding-left:8px;">近 30 天趨勢（{{ trend.count }} 筆紀錄）</h2>
-  <p style="font-size:14px;line-height:1.7;">
-    面板技術：{% for k, v in trend.tech %}{{ k }} {{ v }}{% if not loop.last %}、{% endif %}{% endfor %}<br>
-    {% if trend.refresh %}常見刷新率：{% for k, v in trend.refresh %}{{ k }}（{{ v }}）{% if not loop.last %}、{% endif %}{% endfor %}<br>{% endif %}
-    {% if trend.makers %}面板廠：{% for k, v in trend.makers %}{{ k }}（{{ v }}）{% if not loop.last %}、{% endif %}{% endfor %}{% endif %}
-  </p>
+  {% if glossary %}
+  {{ h2("名詞小辭典", "#999") }}
+  <table role="presentation" cellpadding="4" cellspacing="0" width="100%" style="font-size:12px;line-height:1.6;color:#555;">
+    {% for term, desc in glossary %}<tr><td style="white-space:nowrap;vertical-align:top;font-weight:bold;padding-right:8px;">{{ term }}</td><td>{{ desc }}</td></tr>{% endfor %}
+  </table>
   {% endif %}
 
   <hr style="border:none;border-top:1px solid #e3e6ea;margin:24px 0 12px;">
-  <p style="font-size:12px;color:#888;line-height:1.6;">
+  <p style="font-size:12px;color:#888;line-height:1.7;">
     可信度：{{ badge("A", "官方") }} 品牌或廠商公布　{{ badge("B", "實測") }} 評測或拆機　{{ badge("C", "媒體報導") }} 媒體或彙整　{{ badge("D", "傳聞") }} 社群爆料<br>
-    完整規格表見附件 Excel。每個數值都經過原文比對，找不到原文依據的數值不會出現在報告中。<br>
-    本報告由 Display Intel agent 自動產生。
+    每個數值都經過原文比對；PPI、長寬比、像素密度由程式計算；標示「推算」的面板廠與尺寸由面板型號推得。<br>
+    完整規格表見附件 Excel。本報告由 Display Intel agent 自動產生。
   </p>
 </div>
 </body></html>

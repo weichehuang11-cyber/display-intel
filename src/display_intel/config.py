@@ -38,3 +38,54 @@ def env(name: str, required: bool = False) -> str:
     if required and not value:
         raise RuntimeError(f"缺少環境變數 {name}，請在 .env 或 GitHub Secrets 設定")
     return value
+
+
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def _rotate(items: list, n: int, offset: int) -> list:
+    """從清單中輪流取 n 個（每天換一組，一週內所有查詢都會用到）。"""
+    if not items or n <= 0:
+        return []
+    if n >= len(items):
+        return list(items)
+    start = (offset * n) % len(items)
+    return [items[(start + i) % len(items)] for i in range(n)]
+
+
+def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
+    """決定這次執行用平日輕量（light）或週日完整（full）設定，結果放在 cfg["run"]。
+
+    profile 未指定時：collection.full_day 那天用 full，其他天用 light。
+    展會月（collection.event_months）會額外加查詢。
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(cfg.get("schedule", {}).get("timezone", "Asia/Taipei"))
+    now = (now or datetime.now(tz)).astimezone(tz)
+    col = cfg.get("collection") or {}
+    if profile in (None, "", "auto"):
+        full_day = WEEKDAYS.index(str(col.get("full_day", "sunday")).lower())
+        profile = "full" if now.weekday() == full_day else "light"
+    p = dict(col.get(profile) or {})
+    tv = cfg.get("sources", {}).get("tavily") or {}
+    day = now.date().toordinal()
+    queries = tv.get("queries", [])
+    n = p.get("tavily_queries_per_run", tv.get("max_queries_per_run", 20))
+    chosen = list(queries) if profile == "full" else _rotate(queries, n, day)
+    chosen = chosen[:n] if profile == "full" else chosen
+    event = now.month in col.get("event_months", [])
+    if event:
+        chosen += _rotate(tv.get("event_queries", []), col.get("event_extra_queries_per_run", 0), day)
+    weekly = cfg.get("schedule", {}).get("cadence", "daily") == "weekly"
+    cfg["run"] = {
+        "profile": profile,
+        "event_month": event,
+        "lookback_hours": p.get("lookback_hours", cfg.get("schedule", {}).get("lookback_hours", 170 if weekly else 26)),
+        "news_window": p.get("news_window", "7d" if weekly else "1d"),
+        "tavily_time_range": p.get("tavily_time_range", "week" if weekly else "day"),
+        "tavily_queries": chosen,
+        "max_ai_calls": p.get("max_ai_calls", cfg.get("llm", {}).get("max_calls_per_run", 40)),
+    }
+    return cfg

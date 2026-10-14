@@ -161,7 +161,16 @@ class PanelRecord(BaseModel):
     pixel_count: Optional[int] = None
     aspect_ratio: Optional[str] = None
     density_class: Optional[str] = None
+    # 由面板型號推算（文章沒寫時才用，報告會標示「推算」）
+    panel_maker_inferred: Optional[str] = None
+    size_inferred: Optional[float] = None
     flags: list[str] = Field(default_factory=list)  # 查核發現的問題
+
+    @property
+    def maker(self) -> Optional[str]:
+        """統一名稱後的面板廠（文章寫的優先，其次是型號推算）。"""
+        from .panel_decode import canonical_maker
+        return canonical_maker(self.spec.panel_maker) or self.panel_maker_inferred
 
 
 class PanelEvent(BaseModel):

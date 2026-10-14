@@ -300,3 +300,92 @@ def test_weekly_cadence(db, tmp_path):
     assert "when%3A7d" in google_news_urls(cfg)[0]["url"]
     ctx, html, xlsx, ids = build_report(db, cfg)
     assert ctx["title"] == "筆電顯示器情報週報" and "過去 7 天" in html and "本週重點" in html
+
+
+# ---------- 面板型號解碼與合併 ----------
+
+def test_panel_decode():
+    from display_intel.panel_decode import canonical_maker, decode
+    assert decode("NE160QDM-NY1") == {"maker": "BOE", "size_inch": 16.0}
+    assert decode("ATNA56YX03") == {"maker": "Samsung Display", "size_inch": 15.6}
+    assert decode("B140HAN06.8") == {"maker": "AUO", "size_inch": 14.0}
+    assert decode("N156HCA-EAC")["maker"] == "Innolux"
+    assert decode("LP160UQ1-SPB1")["maker"] == "LG Display"
+    assert decode("XYZ123") is None
+    assert canonical_maker("京东方") == "BOE" and canonical_maker("Samsung") == "Samsung Display"
+    assert canonical_maker("SomeNewMaker") == "SomeNewMaker"
+
+
+def test_inferred_maker_and_merge(db):
+    a = PanelSpec(brand="ASUS", model="ProArt P16（H7607）", panel_tech="OLED", size_inch=16, res_w=3840, res_h=2400)
+    b = PanelSpec(brand="ASUS", model="ASUS ProArt P16", panel_tech="OLED", panel_model="ATNA60CL10", refresh_hz=120)
+    assert verify.model_norm(a) == verify.model_norm(b) == "proartp16"
+    ev1 = verify.merge_panel(db, a, Confidence.C, art("a"), [])
+    ev2 = verify.merge_panel(db, b, Confidence.C, art("b"), [])
+    assert ev1.kind == "new" and ev2.kind == "updated"
+    assert len(db.all_panels()) == 1
+    rec = db.all_panels()[0]
+    assert rec.spec.refresh_hz == 120 and rec.panel_maker_inferred == "Samsung Display" and rec.maker == "Samsung Display"
+    # 不同尺寸不能合併
+    c = PanelSpec(brand="ASUS", model="ProArt P16", panel_tech="OLED", size_inch=14)
+    assert verify.merge_panel(db, c, Confidence.C, art("c"), []).kind == "new"
+
+
+def test_consolidate_existing_duplicates(db):
+    from display_intel.db import utcnow
+    from display_intel.schema import PanelRecord
+    now = utcnow()
+    for key, spec in [("k1", PanelSpec(brand="HP", model="OMEN 16", res_w=2560, res_h=1600)),
+                      ("k2", PanelSpec(brand="HP", model="HP OMEN 16 (16-xd0000)", refresh_hz=240))]:
+        db.put_panel(PanelRecord(key=key, spec=spec, confidence=Confidence.C, source_url="u", source_name="s",
+                                 first_seen=now, last_updated=now))
+    assert verify.consolidate(db) == 1
+    rec = db.all_panels()[0]
+    assert rec.spec.refresh_hz == 240 and rec.spec.res_w == 2560
+
+
+def test_fix_panel_source():
+    from display_intel.extract import fix_panel_source
+    s, flags = fix_panel_source(PanelSpec(brand="ASUS", model="ProArt P16", panel_maker="ASUS", panel_model="Lumina Pro OLED"))
+    assert s.panel_maker is None and s.panel_model is None and len(flags) == 2
+    s, _ = fix_panel_source(PanelSpec(brand="HP", model="X", panel_maker="京东方", panel_model="NE160QDM-NY1"))
+    assert s.panel_maker == "BOE" and s.panel_model == "NE160QDM-NY1"
+    s, _ = fix_panel_source(PanelSpec(brand="HP", model="X", panel_model="TL140ADXP01"))
+    assert s.panel_model == "TL140ADXP01"  # 認不得但像料號 → 保留
+
+
+# ---------- 報告分析 ----------
+
+def _rec(key, days_ago, conf=Confidence.C, **spec):
+    from datetime import timedelta
+    from display_intel.db import utcnow
+    from display_intel.schema import PanelRecord
+    t = utcnow() - timedelta(days=days_ago)
+    r = PanelRecord(key=key, spec=PanelSpec(**spec), confidence=conf, source_url="u", source_name="s", first_seen=t, last_updated=t)
+    return verify._derived(r)
+
+
+def test_analytics_blocks():
+    from datetime import timedelta
+    from display_intel import analytics
+    from display_intel.db import utcnow
+    start = utcnow() - timedelta(days=7)
+    recs = [
+        _rec("a", 1, brand="ASUS", model="A", panel_tech="Tandem OLED", refresh_hz=120, res_w=2880, res_h=1800, size_inch=14, panel_maker="Samsung Display"),
+        _rec("b", 2, brand="HP", model="B", panel_tech="IPS LCD", refresh_hz=240, panel_model="NE160QDM-NY1"),
+        _rec("c", 10, brand="HP", model="C", panel_tech="OLED", refresh_hz=60),
+        _rec("d", 3, Confidence.D, brand="Apple", model="D", panel_tech="OLED"),
+    ]
+    assert analytics.features(recs[0].spec) >= {"OLED", "Tandem OLED", "高解析 2.8K+"}
+    rows = [{"rec": r} for r in recs[:2]]
+    k = {x["label"]: x["value"] for x in analytics.kpis(rows)}
+    assert k["新機型"] == "2" and k["OLED 占比"] == "50%" and k["刷新率中位數"] == "180Hz"
+    lines, tags = analytics.standouts(rows, recs, start)
+    assert any("240Hz" in l for l in lines) and "最高刷新率" in tags["b"]
+    assert any("首見技術：Tandem OLED" in l for l in lines)  # 本期之前只有 C（一般 OLED）
+    wow = {w["metric"]: w for w in analytics.week_over_week(recs, start)}
+    assert wow["新機型數"]["now"] == "2" and wow["新機型數"]["prev"] == "1" and wow["新機型數"]["arrow"] == "▲"
+    m = analytics.brand_maker_matrix(recs)
+    assert set(m["makers"]) == {"Samsung Display", "BOE"} and m["inferred"] == 1
+    assert [t["name"] for t in analytics.rumor_tracker(recs, utcnow())] == ["Apple D"]
+    assert analytics.week_over_week(recs[:2], start) is None  # 沒有上期資料

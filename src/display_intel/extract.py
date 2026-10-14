@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Callable
 
@@ -30,7 +31,9 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
 6. summary 類欄位用繁體中文，一到兩句。
 7. 數值欄位只填數字（不含單位）；解析度拆成 res_w、res_h。
 8. 文章沒提到的布林欄位（例如 touch）直接省略，不要填 false。
-9. panels 只收「有品牌且有具體機型名稱」的產品；只說「某品牌新筆電」而沒有機型名稱的，不要列。"""
+9. panels 只收「有品牌且有具體機型名稱」的產品；只說「某品牌新筆電」而沒有機型名稱的，不要列。
+10. panel_maker 只填面板製造商（如 BOE、Samsung Display、LG Display、AUO、Innolux、CSOT、Sharp），不可填筆電品牌。
+11. panel_model 只填面板料號（如 NE160QDM-NY1、ATNA60CL10），行銷名稱（如 Lumina OLED、Nebula Display）不要填。"""
 
 FIELD_GUIDE = """輸出格式：
 {"results": [ { "article_id": 1, "relevant": true/false, "is_rumor": true/false,
@@ -116,6 +119,29 @@ def is_identifiable(spec: PanelSpec) -> bool:
     return bool(spec.brand and spec.brand.strip() and model and model not in GENERIC_MODELS and len(model) >= 2)
 
 
+def fix_panel_source(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
+    """移除填錯的面板來源：面板廠填成筆電品牌、面板型號填成行銷名稱。"""
+    from .panel_decode import canonical_maker, decode
+    flags = []
+    data = spec.model_dump()
+    brand = (spec.brand or "").strip().lower()
+    maker = (spec.panel_maker or "").strip().lower()
+    if maker and brand and (maker == brand or maker in brand.split() or brand in maker.split()):
+        data["panel_maker"] = None
+        flags.append(f"面板廠填成筆電品牌，已移除：{spec.panel_maker}")
+    pm = spec.panel_model or ""
+    looks_like_part_no = bool(re.search(r"[A-Za-z]{1,4}\d{2,}", pm.replace(" ", "")))
+    if pm and not decode(pm) and (not looks_like_part_no or len(pm.split()) >= 2):
+        data["panel_model"] = None
+        flags.append(f"面板型號看起來是行銷名稱，已移除：{pm}")
+    if data.get("panel_maker"):
+        data["panel_maker"] = canonical_maker(data["panel_maker"])
+    for f in ("panel_maker", "panel_model"):
+        if data.get(f) is None:
+            data["evidence"].pop(f, None)
+    return PanelSpec(**data), flags
+
+
 def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[str]]:
     """原文依據檢查與合理性檢查。"""
     flags: list[str] = []
@@ -123,6 +149,8 @@ def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[s
     panels = []
     for p in ex.panels:
         cleaned, f = clean_spec(p, text)
+        flags += f
+        cleaned, f = fix_panel_source(cleaned)
         flags += f
         if is_identifiable(cleaned):  # 品牌和具體機型都要有，否則無法追蹤
             panels.append(cleaned)

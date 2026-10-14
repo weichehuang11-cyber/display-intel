@@ -17,13 +17,15 @@ extract.py  萃取：多篇文章一批送 AI，輸出 JSON；回來後逐字比
 derive.py   衍生規格（PPI、長寬比、像素密度）、合理性檢查、原文依據檢查
 llm.py      AI 介面：gemini（預設免費）/ anthropic，內建節流與額度保護；GitHub Models 已於 2026-07-30 停止服務
 db.py       SQLite（data/intel.sqlite，由 GitHub Actions commit 回 repo）
-report.py   未報告事件 → HTML Email（templates/report.html.j2）＋ Excel
+report.py   未報告事件 → HTML Email（templates/report.html.j2，卡片式、手機友善）＋ Excel
+analytics.py 關鍵數字、亮點、週對週、技術提及率、品牌×面板廠、傳聞追蹤、名詞辭典（全部程式計算，不經 AI）
+panel_decode.py 面板型號前綴 → 面板廠與尺寸（標示「推算」）、面板廠名稱統一
 mailer.py   Gmail SMTP（應用程式密碼）
 __main__.py 總控：collect / report / run / check-sources / test-email / demo
 demo.py     虛構範例資料，不需金鑰即可產生報告
 ```
 
-排程（`.github/workflows/`）：`collect.yml` 週日 19:17 台灣時間（回看 7 天）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
+排程（`.github/workflows/`）：`collect.yml` 每天 19:17 台灣時間（週一至六 light、週日 full，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
 
 ## 核心規則（修改時務必維持）
 
@@ -47,11 +49,12 @@ python -m display_intel demo # 產生 output/report-日期.html
 
 ## 已知限制與待辦
 
+- 同款機型合併：`verify.compatible` 以品牌＋正規化機型＋相容的尺寸/解析度/面板技術判斷，每次 ingest 後執行 `consolidate`
 - 可信度目前是「整筆紀錄」層級，設計文件要求「欄位層級」（每個欄位各自記來源與等級）
 - Google 新聞連結是轉址頁，抓不到全文，只有摘要
 - 社群只有 Reddit RSS；X、微博需付費 API 或第三方服務
 - 面板廠世代線尚未有獨立的能力檔案資料表（目前以 fab 事件記錄），每月對照表未實作
 - 爆料者命中率統計未實作
-- 週趨勢只在週一、近 30 天紀錄 ≥ 5 筆時出現
+- 報告尚未內嵌圖表；網頁版資料庫（GitHub Pages）未實作
 
 設計文件（完整 Schema、來源清單、路線圖）在使用者的 claude.ai「筆電顯示器情報 AI Agent 系統設計」文件中。

@@ -3,13 +3,33 @@
 # 修改後先執行 `python -m display_intel check-sources` 確認來源可以連線。
 
 schedule:
-  # cadence：weekly = 每週一次（週報）；daily = 每天一次（日報）
-  # 改頻率時，也要同步改 .github/workflows/ 兩個檔案裡的 cron 時間（教學有說明）
+  # cadence：weekly = 每週寄一次週報；daily = 每天寄日報
+  # 改頻率時，也要同步改 .github/workflows/report.yml 的 cron 時間（教學有說明）
   cadence: weekly
   timezone: Asia/Taipei
   send_at: "22:00"          # 寄出時間（週報：每週日 22:00）
   collect_deadline: "21:35" # 蒐集與萃取最晚到這個時間收工，把資料交給報告階段
-  lookback_hours: 170       # 抓多久以內的文章（週報約 7 天；日報改成 26）
+
+# 蒐集排程：每天 19:17 都會蒐集（不寄信），週日做一次完整蒐集後寄週報
+# 這樣可以每天用到 AI 的免費額度，也不會漏掉只保留幾天的新聞
+collection:
+  full_day: sunday            # 哪一天做完整蒐集
+  light:                      # 平日輕量蒐集
+    lookback_hours: 26        # 抓過去多久的文章
+    news_window: 1d           # Google 新聞搜尋範圍
+    tavily_time_range: day
+    tavily_queries_per_run: 8 # 每次用幾次 Tavily（會輪流使用下方查詢清單）
+    max_ai_calls: 30
+  full:                       # 週日完整蒐集
+    lookback_hours: 170
+    news_window: 7d
+    tavily_time_range: week
+    tavily_queries_per_run: 40
+    max_ai_calls: 60
+  # 展會月自動加碼：1 月 CES、5–6 月 Computex、9 月 IFA
+  event_months: [1, 5, 6, 9]
+  event_extra_queries_per_run: 10
+  # Tavily 每月 1,000 次的預估用量：平日 8×6 + 週日 40 = 每週 88，一般月份約 380；展會月約 680
 
 llm:
   # ===== 免費版（預設）=====
@@ -74,31 +94,69 @@ sources:
       ko: ["노트북 OLED", "IT OLED 8.6세대"]
 
   # Tavily 搜尋 API（選用，需 TAVILY_API_KEY）：可抓到文章全文，規格細節會多很多
-  # 免費版每月 1,000 次：週報每週 20 次查詢，一個月約 90 次，額度很充裕
+  # 每次執行用幾個查詢由上方 collection 設定決定；平日會輪流使用，週日全部使用
   tavily:
     max_results: 20
-    max_queries_per_run: 20
     queries:
+      # --- 新機與規格 ---
       - "new laptop OLED display specs"
       - "laptop display refresh rate nits announced"
       - "laptop Mini LED display"
       - "Tandem OLED laptop"
-      - "laptop review display panel measured"
+      - "laptop 2.8K 3K OLED 120Hz"
+      - "laptop 240Hz 300Hz display gaming"
+      - "laptop display PWM dimming flicker"
+      - "laptop display DCI-P3 Delta E color accuracy"
       - "all-in-one PC display announced"
-      - "ASUS Lenovo HP Dell laptop OLED screen"
-      - "Acer MSI Razer gaming laptop display 240Hz"
-      - "Samsung Display LG Display laptop OLED panel"
-      - "BOE AUO Innolux notebook panel"
+      - "laptop touchscreen OLED convertible"
+      # --- 品牌 ---
+      - "ASUS Zenbook Vivobook ROG display"
+      - "Lenovo Yoga ThinkPad Legion display"
+      - "HP Spectre OmniBook OMEN display"
+      - "Dell XPS Alienware display"
+      - "Acer Swift Predator display"
+      - "MSI laptop display"
+      - "Samsung Galaxy Book display"
+      - "Apple MacBook display"
+      - "Razer Blade display"
+      - "Microsoft Surface Laptop display"
+      # --- 評測與拆機 ---
+      - "laptop review display panel measured"
+      - "laptop display panel model teardown"
+      # --- 面板廠與產線 ---
+      - "Samsung Display laptop OLED panel"
+      - "LG Display laptop panel"
+      - "BOE notebook OLED panel"
+      - "AUO Innolux notebook panel"
       - "Gen 8.6 IT OLED production"
+      - "IT OLED capacity investment"
+      # --- 平台廠 ---
       - "Intel laptop display technology"
       - "NVIDIA G-SYNC laptop display"
       - "AMD FreeSync laptop display"
       - "Qualcomm Snapdragon laptop display"
+      # --- 多語系 ---
       - "筆電 OLED 螢幕 規格"
+      - "筆電 面板 友達 群創"
       - "笔记本 屏幕 刷新率 面板"
+      - "笔记本 OLED 京东方 维信诺"
       - "ノートPC 有機EL ディスプレイ"
       - "노트북 OLED 디스플레이"
+      # --- 傳聞 ---
       - "laptop display leak rumor"
+      - "upcoming laptop OLED panel supply chain"
+    # 展會月加碼用的查詢
+    event_queries:
+      - "CES laptop display"
+      - "CES OLED laptop"
+      - "Computex laptop display"
+      - "Computex OLED notebook"
+      - "IFA laptop display"
+      - "trade show new laptop screen"
+      - "laptop announced display specifications"
+      - "AIO PC announced display"
+      - "notebook panel showcase OLED"
+      - "展會 筆電 螢幕"
 
 # 文章初篩關鍵字（不分大小寫）。標題或摘要需「同時」命中兩組才會送進 AI，節省成本。
 keywords:

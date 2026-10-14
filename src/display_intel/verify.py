@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 
 from . import derive
 from .db import DB, utcnow
+from .panel_decode import canonical_maker, decode
 from .schema import (SOURCE_TYPE_CONFIDENCE, Confidence, Extraction, PanelEvent,
                      PanelRecord, PanelSpec, RawArticle)
 
@@ -27,11 +28,52 @@ def tech_family(tech: str | None) -> str:
     return "?"
 
 
+def model_norm(spec: PanelSpec) -> str:
+    """機型名稱正規化：去掉括號內的料號、開頭重複的品牌名、空白與符號。
+
+    例如「ASUS ProArt P16（H7607）」與「ProArt P16」→ 都變成 "proartp16"。
+    """
+    model = re.sub(r"[（(][^）)]*[）)]", " ", spec.model or "")
+    brand = (spec.brand or "").strip()
+    if brand and model.lower().lstrip().startswith(brand.lower()):
+        model = model.lstrip()[len(brand):]
+    return _norm(model)
+
+
 def panel_key(spec: PanelSpec) -> str:
     """同品牌＋同機型＋同面板選項 = 同一筆紀錄。"""
     size = f"{spec.size_inch:g}" if spec.size_inch else "?"
     res = f"{spec.res_w}x{spec.res_h}" if spec.res_w and spec.res_h else "?"
-    return "|".join([_norm(spec.brand), _norm(spec.model), size, tech_family(spec.panel_tech), res])
+    return "|".join([_norm(spec.brand), model_norm(spec), size, tech_family(spec.panel_tech), res])
+
+
+def _compat(a, b, tol=0.0) -> bool:
+    """兩個值相容：其中一個不知道，或兩者相同。"""
+    if a in (None, "", "?") or b in (None, "", "?"):
+        return True
+    return abs(a - b) <= tol if isinstance(a, (int, float)) and isinstance(b, (int, float)) else a == b
+
+
+def compatible(a: PanelSpec, b: PanelSpec) -> bool:
+    """是否可能是同一款機型的同一種面板（缺少的欄位視為相容）。"""
+    if _norm(a.brand) != _norm(b.brand) or model_norm(a) != model_norm(b) or not model_norm(a):
+        return False
+    fa, fb = tech_family(a.panel_tech), tech_family(b.panel_tech)
+    return (_compat(None if fa == "?" else fa, None if fb == "?" else fb)
+            and _compat(a.size_inch, b.size_inch, 0.05)
+            and _compat(a.res_w, b.res_w) and _compat(a.res_h, b.res_h))
+
+
+def _richness(spec: PanelSpec) -> int:
+    return sum(1 for f in SPEC_FIELDS if getattr(spec, f) not in (None, [], ""))
+
+
+def find_existing(db: DB, spec: PanelSpec) -> PanelRecord | None:
+    rec = db.get_panel(panel_key(spec))
+    if rec:
+        return rec
+    matches = [r for r in db.all_panels() if compatible(r.spec, spec)]
+    return max(matches, key=lambda r: _richness(r.spec)) if matches else None
 
 
 def confidence_for(article: RawArticle, is_rumor: bool) -> Confidence:
@@ -64,13 +106,25 @@ def _derived(rec: PanelRecord) -> PanelRecord:
     rec.pixel_count = s.res_w * s.res_h if s.res_w and s.res_h else None
     rec.aspect_ratio = derive.aspect_ratio(s.res_w, s.res_h)
     rec.density_class = derive.density_class(rec.ppi)
+    dec = decode(s.panel_model)
+    rec.panel_maker_inferred = None
+    rec.size_inferred = None
+    if dec:
+        if not s.panel_maker:
+            rec.panel_maker_inferred = dec["maker"]
+        elif canonical_maker(s.panel_maker) != dec["maker"]:
+            note = f"面板型號推算為 {dec['maker']}，與報導的 {s.panel_maker} 不同"
+            if note not in rec.flags:
+                rec.flags.append(note)
+        if not s.size_inch and dec["size_inch"]:
+            rec.size_inferred = dec["size_inch"]
     return rec
 
 
 def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, flags: list[str]) -> PanelEvent | None:
     key = panel_key(spec)
     now = utcnow()
-    existing = db.get_panel(key)
+    existing = find_existing(db, spec)
     if existing is None:
         rec = _derived(PanelRecord(key=key, spec=spec, confidence=conf, source_url=article.url,
                                    source_name=article.source, first_seen=now, last_updated=now, flags=flags))
@@ -111,13 +165,37 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
     return PanelEvent(kind="rumor_confirmed" if rumor_confirmed else "updated", record=rec, changes=changes)
 
 
+def consolidate(db: DB) -> int:
+    """合併資料庫中其實是同一款的重複紀錄（例如名稱多了料號）。回傳合併掉的筆數。"""
+    recs = sorted(db.all_panels(), key=lambda r: (-r.confidence.rank, -_richness(r.spec)))
+    kept: list[PanelRecord] = []
+    removed = 0
+    for r in recs:
+        target = next((k for k in kept if compatible(k.spec, r.spec)), None)
+        if target is None:
+            kept.append(r)
+            continue
+        data = target.spec.model_dump()
+        for f in SPEC_FIELDS:
+            if data.get(f) in (None, [], "") and getattr(r.spec, f) not in (None, [], ""):
+                data[f] = getattr(r.spec, f)
+        data["evidence"] = {**r.spec.evidence, **target.spec.evidence}
+        target.spec = PanelSpec(**data)
+        target.first_seen = min(target.first_seen, r.first_seen)
+        target.flags = list(dict.fromkeys(target.flags + r.flags))[-20:]
+        db.put_panel(_derived(target))
+        db.conn.execute("DELETE FROM panels WHERE key = ?", (r.key,))
+        removed += 1
+    return removed
+
+
 def _hash(*parts) -> str:
     return hashlib.sha1("|".join(_norm(p) for p in parts).encode()).hexdigest()[:16]
 
 
 def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]]) -> dict:
     """把萃取結果寫入資料庫並產生報告事件。回傳統計。"""
-    stats = {"panel_new": 0, "panel_updated": 0, "rumor_confirmed": 0, "platform": 0, "fab": 0, "industry": 0}
+    stats = {"panel_new": 0, "panel_updated": 0, "rumor_confirmed": 0, "platform": 0, "fab": 0, "industry": 0, "merged": 0}
     for article, ex, flags in results:
         conf = confidence_for(article, ex.is_rumor)
         for spec in ex.panels:
@@ -141,4 +219,5 @@ def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]]) -> d
                 db.add_event("industry", "note", {"note": ex.industry_note, "title": article.title},
                              conf.value, article.url, article.source, key)
                 stats["industry"] += 1
+    stats["merged"] = consolidate(db)
     return stats

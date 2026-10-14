@@ -43,6 +43,14 @@ def cmd_collect(cfg: dict, args) -> int:
     db = DB(cfg["report"]["database"])
     stats: dict = {}
     try:
+        from .config import apply_profile
+        apply_profile(cfg, profile=getattr(args, "profile", None))
+        run = cfg["run"]
+        cfg["llm"]["max_calls_per_run"] = run["max_ai_calls"]
+        stats["profile"] = run["profile"] + ("（展會月加碼）" if run["event_month"] else "")
+        stats["tavily_queries"] = len(run["tavily_queries"])
+        log.info("本次蒐集：%s，回看 %s 小時，Tavily %d 次查詢，AI 上限 %d 次",
+                 stats["profile"], run["lookback_hours"], len(run["tavily_queries"]), run["max_ai_calls"])
         src_errors: dict = {}
         articles, src_stats = collect(cfg, errors=src_errors)
         stats["sources"] = src_stats
@@ -207,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=None)
     p.add_argument("--dry-run", action="store_true", help="不寄信，只產生報告檔案")
     p.add_argument("--no-wait", action="store_true", help="不等到寄送時間，立刻寄出")
+    p.add_argument("--profile", choices=["auto", "light", "full"], default="auto",
+                   help="蒐集模式：auto 依星期自動決定；light 平日輕量；full 完整")
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     handler = {"collect": cmd_collect, "report": cmd_report, "run": cmd_run,

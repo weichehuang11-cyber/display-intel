@@ -1,11 +1,18 @@
-# 每週日傍晚蒐集過去 7 天的新聞並萃取規格（台灣時間 19:17 開始，21:35 前收工）
-# 想改回每天：cron 改成 "17 22 * * *"，並把 config.yaml 的 cadence 改成 daily
-name: 1. 每週蒐集
+# 每天台灣時間 19:17 蒐集新聞並萃取規格（不寄信）
+# 週一到週六是輕量蒐集；週日是完整蒐集（回看 7 天），21:35 前收工，接著產生週報
+# 模式與用量在 config.yaml 的 collection 區塊設定
+name: 1. 每日蒐集
 
 on:
   schedule:
-    - cron: "17 11 * * 0"   # 每週日 UTC 11:17 = 台灣時間週日 19:17
+    - cron: "17 11 * * *"   # 每天 UTC 11:17 = 台灣時間 19:17
   workflow_dispatch:          # 允許在 Actions 頁面手動執行
+    inputs:
+      profile:
+        description: "auto = 依星期自動；light = 輕量；full = 完整（回看 7 天）"
+        type: choice
+        options: [auto, light, full]
+        default: auto
 
 permissions:
   contents: write   # 把資料庫存回 repo
@@ -31,7 +38,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-        run: python -m display_intel collect
+        run: python -m display_intel collect --profile "${{ inputs.profile || 'auto' }}"
       - name: 儲存資料庫
         if: always()
         run: |
@@ -39,6 +46,6 @@ jobs:
           git config user.email "display-intel-bot@users.noreply.github.com"
           git add data/intel.sqlite 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
-          git commit -m "data: 每週蒐集 $(TZ=Asia/Taipei date +%F)"
+          git commit -m "data: 蒐集 $(TZ=Asia/Taipei date +%F)"
           git pull --rebase -X theirs || true
           git push

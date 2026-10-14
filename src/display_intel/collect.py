@@ -138,7 +138,7 @@ def _rss_source(client, src: dict, since: datetime) -> list[RawArticle]:
 
 def google_news_urls(cfg: dict) -> list[dict]:
     gn = cfg["sources"].get("google_news") or {}
-    window = "7d" if is_weekly(cfg) else "1d"
+    window = (cfg.get("run") or {}).get("news_window") or ("7d" if is_weekly(cfg) else "1d")
     srcs = []
     for loc in gn.get("locales", []):
         for q in gn.get("queries", {}).get(loc["lang"], []):
@@ -151,14 +151,19 @@ def google_news_urls(cfg: dict) -> list[dict]:
 def _tavily(client, cfg: dict) -> list[RawArticle]:
     key = env("TAVILY_API_KEY")
     tv = cfg["sources"].get("tavily") or {}
-    if not key or not tv.get("queries"):
+    run = cfg.get("run") or {}
+    queries = run.get("tavily_queries")
+    if queries is None:
+        queries = tv.get("queries", [])[: tv.get("max_queries_per_run", 20)]
+    if not key or not queries:
         return []
     out = []
-    for q in tv["queries"][: tv.get("max_queries_per_run", 20)]:
+    time_range = run.get("tavily_time_range") or ("week" if is_weekly(cfg) else "day")
+    for q in queries:
         try:
             r = client.post("https://api.tavily.com/search",
                             headers={"Authorization": f"Bearer {key}"},
-                            json={"query": q, "topic": "news", "time_range": "week" if is_weekly(cfg) else "day", "search_depth": "basic",
+                            json={"query": q, "topic": "news", "time_range": time_range, "search_depth": "basic",
                                   "max_results": tv.get("max_results", 10), "include_raw_content": "text"})
             r.raise_for_status()
             for item in r.json().get("results", []):
@@ -202,7 +207,8 @@ def collect(cfg: dict, now: datetime | None = None, errors: dict | None = None) 
     """
     errors = {} if errors is None else errors
     now = now or datetime.now(timezone.utc)
-    since = now - timedelta(hours=cfg["schedule"].get("lookback_hours", 26))
+    hours = (cfg.get("run") or {}).get("lookback_hours") or cfg["schedule"].get("lookback_hours", 26)
+    since = now - timedelta(hours=hours)
     stats: dict[str, int] = {}
     articles: list[RawArticle] = []
 
