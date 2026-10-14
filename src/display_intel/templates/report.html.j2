@@ -9,7 +9,7 @@
 {%- macro card(c, show_changes=False) -%}
 <div style="border:1px solid #e3e6ea;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fff;">
   <div style="font-size:15px;font-weight:bold;line-height:1.4;">{{ c.brand }} {{ c.model }}</div>
-  <div style="margin:4px 0 6px;">{{ badge(c.conf_code, c.confidence) }} {% for t in c.tags %}{{ tagchip(t) }}{% endfor %}</div>
+  <div style="margin:4px 0 6px;">{{ badge(c.conf_code, c.confidence) }} <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;line-height:18px;color:{% if c.score_pct >= 70 %}#1e7d4f{% elif c.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};background:#f1f3f5;">規格 {{ c.score }}</span> {% for t in c.tags %}{{ tagchip(t) }}{% endfor %}</div>
   {% if c.screen %}<div style="font-size:14px;line-height:1.6;">🖥 {{ c.screen }}</div>{% endif %}
   {% if c.bright %}<div style="font-size:14px;line-height:1.6;">☀ {{ c.bright }}</div>{% endif %}
   <div style="font-size:14px;line-height:1.6;{% if not c.panel_known %}color:#999;{% endif %}">🏭 {{ c.panel }}</div>
@@ -134,6 +134,17 @@
   {% if matrix.inferred %}<div style="font-size:11px;color:#999;margin-top:4px;">其中 {{ matrix.inferred }} 款的面板廠由面板型號推算。</div>{% endif %}
   {% else %}
   <p style="font-size:13px;color:#888;margin:12px 0 4px;">品牌 × 面板廠：目前報導中提到面板廠的機型還不多，資料累積中。</p>
+  {% endif %}
+
+  {% if to_fill %}
+  <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">規格待補清單</div>
+  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#eef0f6;text-align:left;"><th>機型</th><th>完整度</th></tr>
+    {% for t in to_fill %}
+    <tr style="border-top:1px solid #e3e6ea;"><td>{{ t.name }}<div style="font-size:11px;color:#999;">缺：{{ t.missing }}</div></td><td>{{ t.score }}</td></tr>
+    {% endfor %}
+  </table>
+  <div style="font-size:11px;color:#999;margin-top:4px;">系統會自動回頭補查這些機型的官方規格頁與評測；面板廠與型號通常要等評測或拆機才會公開。</div>
   {% endif %}
 
   {% if trend %}

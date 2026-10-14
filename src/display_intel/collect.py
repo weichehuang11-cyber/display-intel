@@ -159,11 +159,15 @@ def _tavily(client, cfg: dict) -> list[RawArticle]:
         return []
     out = []
     time_range = run.get("tavily_time_range") or ("week" if is_weekly(cfg) else "day")
+    window: dict = {"time_range": time_range}
+    if run.get("tavily_days"):
+        start = (datetime.now(timezone.utc) - timedelta(days=run["tavily_days"])).strftime("%Y-%m-%d")
+        window = {"start_date": start}
     for q in queries:
         try:
             r = client.post("https://api.tavily.com/search",
                             headers={"Authorization": f"Bearer {key}"},
-                            json={"query": q, "topic": "news", "time_range": time_range, "search_depth": "basic",
+                            json={"query": q, "topic": "news", **window, "search_depth": "basic",
                                   "max_results": tv.get("max_results", 10), "include_raw_content": "text"})
             r.raise_for_status()
             for item in r.json().get("results", []):

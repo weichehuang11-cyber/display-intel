@@ -1,6 +1,6 @@
 # Display Intel：筆電顯示器情報 Agent
 
-每天自動蒐集全球 Notebook、Laptop、AIO 的螢幕規格（LCD／OLED）、平台廠（Intel、NVIDIA、AMD、Qualcomm）顯示技術、面板廠世代線動態，每週日台灣時間 **22:00** 把整理好的週報寄到你的信箱，附完整 Excel 規格表。（也可改回每天寄日報，見「日常調整」）
+定期自動蒐集全球 Notebook、Laptop、AIO 的螢幕規格（LCD／OLED）、平台廠（Intel、NVIDIA、AMD、Qualcomm）顯示技術、面板廠世代線動態，每週日台灣時間 **22:00** 把整理好的週報寄到你的信箱，附完整 Excel 規格表。（也可改回每天寄日報，見「日常調整」）
 
 - 全部在 GitHub 雲端執行，**你的電腦不用開機**
 - 預設**完全免費**：GitHub Actions＋Google Gemini 免費 AI＋Gmail
@@ -48,7 +48,7 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 
 1. 點 repo 上方的 **Actions** 分頁
 2. 如果看到「Workflows aren't being run on this repository」或綠色按鈕「**I understand my workflows, go ahead and enable them**」，點它
-3. 左側應該看到三個項目：`1. 每日蒐集`、`2. 每週報告`、`測試`
+3. 左側應該看到三個項目：`1. 定期蒐集`、`2. 每週報告`、`測試`
 
 ### 步驟 4：第一次手動測試
 
@@ -62,7 +62,7 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 
 **4-2 跑一次真正的蒐集（約 20–40 分鐘）**
 
-1. Actions → **1. 每日蒐集** → **Run workflow** → **Run workflow**
+1. Actions → **1. 定期蒐集** → **Run workflow** → **Run workflow**
 2. 執行中是黃色圓圈，可以關掉網頁，晚點再回來看
 3. 完成後點進去 → 點 `collect` → 展開「蒐集、萃取、查核」，最後幾行會顯示抓到幾篇文章、新增幾筆規格
 
@@ -77,12 +77,24 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 
 | 台灣時間 | 動作 |
 | --- | --- |
-| 週一至週六 19:17 | 輕量蒐集當天新聞、AI 萃取規格（不寄信） |
-| 週日 19:17 | 完整蒐集過去 7 天的新聞，補齊平日漏掉的（最晚 21:35 收工） |
+| 週一、三、五 19:17 | 輕量蒐集最近 2 天的新聞、AI 萃取規格，再補查 6 款缺規格的機型（不寄信） |
+| 週日 19:17 | 完整蒐集過去 7 天的新聞，補查 15 款機型（最晚 21:35 收工） |
 | 週日 21:17 | 產生週報，等待到 22:00 |
 | 週日 22:00 | 寄出週報 |
 
-每天少量蒐集的好處：AI 免費額度每天重置，分散到七天可以多處理好幾倍的文章；只保留幾天的新聞也不會漏掉。展會月（1 月 CES、5–6 月 Computex、9 月 IFA）會自動多搜尋一些。
+分散在一週中蒐集的好處：AI 免費額度每天重置，分散執行可以處理更多文章；只保留幾天的新聞也比較不會漏掉。展會月（1 月 CES、5–6 月 Computex、9 月 IFA）會自動多搜尋一些。
+
+**規格補完**：新聞稿常只寫一部分規格。每次蒐集後，系統會挑出缺少重點規格的新機型，再搜尋官方規格頁與評測（例如 Notebookcheck）補齊，補到的內容會出現在週報的「規格更新」。每款機型最多補查 3 次，間隔至少 6 天。
+
+## 臨時需求：手動加跑
+
+Tavily 一般月份約用 450 次，保留了 300 次以上給臨時需求：
+
+| 想做的事 | 操作 | 約用 Tavily |
+| --- | --- | --- |
+| 有大型發表會，想立刻蒐集 | 「1. 定期蒐集」→ Run workflow → profile 選 `full` | 55 次 |
+| 只想補齊既有機型的規格 | profile 選 `enrich` | 每款 1 次，最多 25 次 |
+| 想立刻收到最新報告 | 「2. 每週報告」→ mode 選 `now` | 0 次 |
 
 > GitHub 的免費排程在尖峰時段偶爾會延遲 10–30 分鐘，所以報告階段提早啟動預留緩衝。
 
@@ -98,12 +110,13 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 | 新增搜尋關鍵字 | `google_news:` → `queries:` |
 | 讓更多文章被收進來 | `keywords:` 底下加詞 |
 | 改寄送時間 | `schedule:` → `send_at`（也要同步改 `.github/workflows/report.yml` 的 cron） |
-| 調整每天的搜尋量 | `collection:` 底下 `light`（平日）與 `full`（週日）的 `tavily_queries_per_run`、`max_ai_calls` |
+| 調整搜尋量 | `collection:` 底下 `light`（週一三五）與 `full`（週日）的 `tavily_queries_per_run`、`enrich_models`、`max_ai_calls` |
+| 調整補查規則 | `collection:` 的 `enrich_min_missing`（缺幾項才補）、`enrich_max_attempts`、`enrich_retry_days` |
 | 調整展會月 | `collection:` 的 `event_months` 與 `event_extra_queries_per_run` |
 | 改回每天寄日報 | `schedule:` 的 `cadence` 改成 `daily`、`send_at` 改成 `"09:30"`、`collect_deadline` 改成 `"08:35"`、`lookback_hours` 改成 `26`；兩個 workflow 檔案開頭的註解寫了要換成的 cron |
 | 改信件標題 | `report:` → `subject_prefix` |
 
-改來源後建議手動跑一次「1. 每日蒐集」，看紀錄裡「來源統計」有沒有某個來源一直是 0 篇（代表網址失效）。
+改來源後建議手動跑一次「1. 定期蒐集」，看紀錄裡「來源統計」有沒有某個來源一直是 0 篇（代表網址失效）。
 
 ---
 
@@ -132,12 +145,12 @@ GitHub 會停用長期沒有活動的 repo 排程；本程式每週會把資料�
 
 ## 建議加裝：Tavily 全文搜尋（免費，約 3 分鐘）
 
-Google 新聞大多只給標題和摘要，Tavily 可以抓到文章全文，解析度、刷新率、亮度、面板型號等細節會多很多。免費版每月 1,000 次；平日每天 8 次、週日 40 次，一般月份約用 380 次，展會月約 680 次。設定頁的「Pay as you go」請保持關閉，額度用完只會暫停，不會收費。
+Google 新聞大多只給標題和摘要，Tavily 可以抓到文章全文，解析度、刷新率、亮度、面板型號等細節會多很多。免費版每月 1,000 次；週一三五各 10 次、週日 40 次，加上規格補完，一般月份約用 450 次，展會月約 620 次。設定頁的「Pay as you go」請保持關閉，額度用完只會暫停，不會收費。
 
 1. 打開 <https://app.tavily.com>，用 Google 帳號登入
 2. 登入後首頁會顯示一組 `tvly-` 開頭的 API Key，點複製
 3. GitHub → Settings → Secrets → 新增 `TAVILY_API_KEY`，貼上金鑰
-4. 下次執行「1. 每日蒐集」就會自動使用
+4. 下次執行「1. 定期蒐集」就會自動使用
 
 ## 升級：AI 換成 Claude（品質最有感的升級，每月約 US$20–60）
 
@@ -155,7 +168,7 @@ NAS 準時度較好、資料留在自己手上。需要 NAS 支援 Docker（Syno
 
 1. 把整個 repo 下載到 NAS，例如 `/volume1/docker/display-intel`
 2. 在該資料夾建立 `.env`，照 `.env.example` 填入 Gmail 與 Gemini 金鑰
-3. Synology「控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼」，使用者選 root，每天 19:15，指令：
+3. Synology「控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼」，使用者選 root，週一、三、五、日 19:15，指令：
    ```
    cd /volume1/docker/display-intel && docker compose run --rm agent
    ```

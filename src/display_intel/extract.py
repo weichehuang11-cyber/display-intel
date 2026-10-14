@@ -58,11 +58,22 @@ FIELD_GUIDE = """輸出格式：
 不相關的文章只需回傳 {"article_id": N, "relevant": false}。"""
 
 
-def make_batches(articles: list[RawArticle], max_chars_per_call: int, max_chars_per_article: int) -> list[list[RawArticle]]:
+LONG_FORM_TYPES = {"review", "official"}
+
+
+def article_limit(a: RawArticle, max_chars_per_article: int, max_chars_per_review: int | None = None) -> int:
+    """評測與官方規格頁的規格表常在後段，給較多字數。"""
+    if max_chars_per_review and a.source_type in LONG_FORM_TYPES:
+        return max(max_chars_per_review, max_chars_per_article)
+    return max_chars_per_article
+
+
+def make_batches(articles: list[RawArticle], max_chars_per_call: int, max_chars_per_article: int,
+                 max_chars_per_review: int | None = None) -> list[list[RawArticle]]:
     """依字數預算把文章分批。"""
     batches, cur, size = [], [], 0
     for a in articles:
-        n = min(len(a.text), max_chars_per_article) + 80
+        n = min(len(a.text), article_limit(a, max_chars_per_article, max_chars_per_review)) + 80
         if cur and size + n > max_chars_per_call:
             batches.append(cur)
             cur, size = [], 0
@@ -73,11 +84,17 @@ def make_batches(articles: list[RawArticle], max_chars_per_call: int, max_chars_
     return batches
 
 
-def _render_batch(batch: list[RawArticle], max_chars: int) -> str:
-    parts = [FIELD_GUIDE, "\n以下是文章：\n"]
+def _render_batch(batch: list[RawArticle], max_chars: int, max_chars_review: int | None = None,
+                  focus: str | None = None) -> str:
+    parts = [FIELD_GUIDE]
+    if focus:
+        parts.append(f"\n本批文章只需萃取「{focus}」這款機型的螢幕規格，其他機型一律忽略；"
+                     "同一機型有多種螢幕選配時各列一筆。platform_techs、fabs 不用填。")
+    parts.append("\n以下是文章：\n")
     for i, a in enumerate(batch, 1):
         date = a.published.strftime("%Y-%m-%d") if a.published else "未知"
-        parts.append(f"=== article_id: {i} | 來源: {a.source} | 日期: {date} ===\n{a.text[:max_chars]}\n")
+        limit = article_limit(a, max_chars, max_chars_review)
+        parts.append(f"=== article_id: {i} | 來源: {a.source} | 日期: {date} ===\n{a.text[:limit]}\n")
     return "\n".join(parts)
 
 
@@ -166,9 +183,15 @@ def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[s
 
 
 def extract_all(articles: list[RawArticle], llm: LLM, llm_cfg: dict,
-                should_stop: Callable[[], bool] = lambda: False) -> tuple[list[tuple[RawArticle, Extraction, list[str]]], dict]:
-    """萃取所有文章。回傳 [(文章, 萃取結果, 問題標記)] 與統計。"""
-    batches = make_batches(articles, llm_cfg.get("max_chars_per_call", 6000), llm_cfg.get("max_chars_per_article", 2500))
+                should_stop: Callable[[], bool] = lambda: False,
+                focus: str | None = None) -> tuple[list[tuple[RawArticle, Extraction, list[str]]], dict]:
+    """萃取所有文章。回傳 [(文章, 萃取結果, 問題標記)] 與統計。
+
+    focus：只萃取指定機型（規格補完時使用）。
+    """
+    per_article = llm_cfg.get("max_chars_per_article", 2500)
+    per_review = llm_cfg.get("max_chars_per_review")
+    batches = make_batches(articles, llm_cfg.get("max_chars_per_call", 6000), per_article, per_review)
     results = []
     processed: list[RawArticle] = []
     stats = {"batches": len(batches), "done_batches": 0, "failed_batches": 0, "split_batches": 0,
@@ -182,7 +205,7 @@ def extract_all(articles: list[RawArticle], llm: LLM, llm_cfg: dict,
             stats["stopped"] = "已到收工時間"
             break
         try:
-            data = llm.complete_json(SYSTEM_PROMPT, _render_batch(batch, llm_cfg.get("max_chars_per_article", 2500)))
+            data = llm.complete_json(SYSTEM_PROMPT, _render_batch(batch, per_article, per_review, focus))
         except BudgetExceeded as exc:
             stats["stopped"] = str(exc)
             log.warning("停止萃取：%s", exc)

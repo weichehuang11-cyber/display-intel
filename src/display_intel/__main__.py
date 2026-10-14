@@ -51,34 +51,50 @@ def cmd_collect(cfg: dict, args) -> int:
         stats["tavily_queries"] = len(run["tavily_queries"])
         log.info("本次蒐集：%s，回看 %s 小時，Tavily %d 次查詢，AI 上限 %d 次",
                  stats["profile"], run["lookback_hours"], len(run["tavily_queries"]), run["max_ai_calls"])
-        src_errors: dict = {}
-        articles, src_stats = collect(cfg, errors=src_errors)
-        stats["sources"] = src_stats
-        stats["source_errors"] = src_errors
-        stats["after_keyword_filter"] = len(articles)
-        articles = verify.dedupe_articles(articles, db)
-        stats["after_dedupe"] = len(articles)
-        # 官方與評測優先送 AI，其次是有全文的文章
-        rank = {"official": 0, "review": 1, "media": 2, "aggregator": 3, "social": 4}
-        articles.sort(key=lambda a: (rank.get(a.source_type, 5), a.content_level != "full"))
-
         deadline = _at_today(cfg, cfg["schedule"].get("collect_deadline", "08:35"))
         tz = deadline.tzinfo
-        # 只有在「截止時間之前不久」啟動才套用截止時間（避免手動在下午執行時一開始就停止）
+        # 只有在「截止時間之前」啟動才套用截止時間（避免手動在深夜執行時一開始就停止）
         stop_active = datetime.now(tz) < deadline
         should_stop = lambda: stop_active and datetime.now(tz) >= deadline
 
+        # 週日用較準確的模型；不能用時 _working_llm 會自動改回預設模型
+        if run.get("extract_model"):
+            base = cfg["llm"]["extract_model"]
+            cfg["llm"]["fallback_models"] = [base] + [m for m in cfg["llm"].get("fallback_models", []) if m != base]
+            cfg["llm"]["extract_model"] = run["extract_model"]
         llm = _working_llm(cfg, stats)
         if llm is None:
             log.error("AI 無法使用，今天跳過萃取。原因：%s", stats["llm_probe"])
             return 1
-        results, ex_stats = extract_all(articles, llm, cfg["llm"], should_stop)
-        processed = ex_stats.pop("processed")
-        stats["extract"] = ex_stats | {"llm_calls": llm.calls}
-        stats["ingest"] = verify.ingest(db, results)
-        for a in processed:
-            db.add_article(a.url, a.title, a.source)
-        log.info("完成：%s", stats["ingest"])
+
+        if run["collect_news"]:
+            src_errors: dict = {}
+            articles, src_stats = collect(cfg, errors=src_errors)
+            stats["sources"] = src_stats
+            stats["source_errors"] = src_errors
+            stats["after_keyword_filter"] = len(articles)
+            articles = verify.dedupe_articles(articles, db)
+            stats["after_dedupe"] = len(articles)
+            # 官方與評測優先送 AI，其次是有全文的文章
+            rank = {"official": 0, "review": 1, "media": 2, "aggregator": 3, "social": 4}
+            articles.sort(key=lambda a: (rank.get(a.source_type, 5), a.content_level != "full"))
+            results, ex_stats = extract_all(articles, llm, cfg["llm"], should_stop)
+            processed = ex_stats.pop("processed")
+            stats["extract"] = ex_stats | {"llm_calls": llm.calls}
+            stats["ingest"] = verify.ingest(db, results)
+            for a in processed:
+                db.add_article(a.url, a.title, a.source)
+
+        # 規格補完：用剩下的 AI 額度補查缺少規格的機型
+        if run.get("enrich_models"):
+            from .enrich import enrich
+            try:
+                stats["enrich"] = enrich(db, cfg, llm, run["enrich_models"], should_stop)
+            except Exception as exc:
+                log.exception("規格補完失敗（不影響已完成的蒐集）")
+                stats["enrich"] = {"error": f"{type(exc).__name__}：{exc}"}
+        stats["llm_calls_total"] = llm.calls
+        log.info("完成：%s", stats.get("ingest", {}))
         return 0
     finally:
         db.log_run("collect", started, stats)
@@ -121,7 +137,7 @@ def _print_stats(stats: dict):
         log.info("來源統計：共 %d 個，%d 個今天沒抓到文章%s", len(src), len(zero), f"（{', '.join(zero[:8])}）" if zero else "")
     for name, err in stats.get("source_errors", {}).items():
         log.info("來源失敗：%s → %s", name, err)
-    for k in ("llm_probe", "after_keyword_filter", "after_dedupe", "extract", "ingest"):
+    for k in ("profile", "llm_probe", "after_keyword_filter", "after_dedupe", "extract", "ingest", "enrich"):
         if k in stats:
             log.info("%s：%s", k, stats[k])
 
@@ -215,8 +231,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=None)
     p.add_argument("--dry-run", action="store_true", help="不寄信，只產生報告檔案")
     p.add_argument("--no-wait", action="store_true", help="不等到寄送時間，立刻寄出")
-    p.add_argument("--profile", choices=["auto", "light", "full"], default="auto",
-                   help="蒐集模式：auto 依星期自動決定；light 平日輕量；full 完整")
+    p.add_argument("--profile", choices=["auto", "light", "full", "enrich"], default="auto",
+                   help="蒐集模式：auto 依星期自動；light 輕量；full 完整；enrich 只補查缺少的規格")
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     handler = {"collect": cmd_collect, "report": cmd_report, "run": cmd_run,

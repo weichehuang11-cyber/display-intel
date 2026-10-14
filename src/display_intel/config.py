@@ -73,10 +73,14 @@ def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
     day = now.date().toordinal()
     queries = tv.get("queries", [])
     n = p.get("tavily_queries_per_run", tv.get("max_queries_per_run", 20))
-    chosen = list(queries) if profile == "full" else _rotate(queries, n, day)
-    chosen = chosen[:n] if profile == "full" else chosen
+    if profile == "enrich":
+        chosen = []  # 只做規格補完，不搜尋新聞
+    elif profile == "full":
+        chosen = list(queries)[:n]
+    else:
+        chosen = _rotate(queries, n, day)
     event = now.month in col.get("event_months", [])
-    if event:
+    if event and profile != "enrich":
         chosen += _rotate(tv.get("event_queries", []), col.get("event_extra_queries_per_run", 0), day)
     weekly = cfg.get("schedule", {}).get("cadence", "daily") == "weekly"
     cfg["run"] = {
@@ -85,7 +89,11 @@ def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
         "lookback_hours": p.get("lookback_hours", cfg.get("schedule", {}).get("lookback_hours", 170 if weekly else 26)),
         "news_window": p.get("news_window", "7d" if weekly else "1d"),
         "tavily_time_range": p.get("tavily_time_range", "week" if weekly else "day"),
+        "tavily_days": p.get("tavily_days"),
         "tavily_queries": chosen,
         "max_ai_calls": p.get("max_ai_calls", cfg.get("llm", {}).get("max_calls_per_run", 40)),
+        "enrich_models": p.get("enrich_models", 0),
+        "extract_model": p.get("extract_model"),
+        "collect_news": profile != "enrich",
     }
     return cfg

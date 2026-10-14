@@ -10,26 +10,38 @@ schedule:
   send_at: "22:00"          # 寄出時間（週報：每週日 22:00）
   collect_deadline: "21:35" # 蒐集與萃取最晚到這個時間收工，把資料交給報告階段
 
-# 蒐集排程：每天 19:17 都會蒐集（不寄信），週日做一次完整蒐集後寄週報
-# 這樣可以每天用到 AI 的免費額度，也不會漏掉只保留幾天的新聞
+# 蒐集排程：週一、三、五 19:17 輕量蒐集（不寄信），週日完整蒐集後寄週報
+# 每次蒐集後會自動「規格補完」：針對缺少規格的新機型，再搜尋官方規格頁與評測
 collection:
   full_day: sunday            # 哪一天做完整蒐集
-  light:                      # 平日輕量蒐集
-    lookback_hours: 26        # 抓過去多久的文章
-    news_window: 1d           # Google 新聞搜尋範圍
-    tavily_time_range: day
-    tavily_queries_per_run: 8 # 每次用幾次 Tavily（會輪流使用下方查詢清單）
+  light:                      # 週一、三、五輕量蒐集
+    lookback_hours: 50        # 回看約 2 天
+    news_window: 2d           # Google 新聞搜尋範圍
+    tavily_days: 2            # Tavily 搜尋最近幾天
+    tavily_queries_per_run: 10
     max_ai_calls: 30
+    enrich_models: 6          # 每次補完幾款機型（每款約用 1 次 Tavily）
   full:                       # 週日完整蒐集
     lookback_hours: 170
     news_window: 7d
     tavily_time_range: week
     tavily_queries_per_run: 40
     max_ai_calls: 60
+    enrich_models: 15
+    extract_model: gemini-3.8-flash   # 週日用較準確的模型（不能用時自動改回上方預設模型）
+  enrich:                     # 只做規格補完（手動執行用，應付臨時需求）
+    max_ai_calls: 40
+    enrich_models: 25
+  # 補完規則
+  enrich_min_missing: 4       # 重點欄位缺 4 項以上才補查
+  enrich_max_attempts: 3      # 同一款最多補查 3 次
+  enrich_retry_days: 6        # 補查過的機型，6 天內不重複補查
+  enrich_within_days: 45      # 只補查 45 天內出現的機型
   # 展會月自動加碼：1 月 CES、5–6 月 Computex、9 月 IFA
   event_months: [1, 5, 6, 9]
   event_extra_queries_per_run: 10
-  # Tavily 每月 1,000 次的預估用量：平日 8×6 + 週日 40 = 每週 88，一般月份約 380；展會月約 680
+  # Tavily 每月 1,000 次預估：週一三五 10×3 + 週日 40 = 每週 70，補完每週約 33；
+  # 一般月份約 450，展會月約 620，保留 300 次以上給臨時手動執行
 
 llm:
   # ===== 免費版（預設）=====
@@ -42,7 +54,8 @@ llm:
   max_calls_per_run: 60             # 每次執行最多呼叫幾次 AI（週報一次處理一整週；額度用完會自動停止）
   min_seconds_between_calls: 15     # 每次呼叫間隔，避免超過每分鐘上限
   max_chars_per_call: 20000         # 每次送給 AI 的文字量（一次多送幾篇，省呼叫次數）
-  max_chars_per_article: 3500
+  max_chars_per_article: 3500       # 一般新聞每篇最多送給 AI 的字數
+  max_chars_per_review: 8000        # 評測與官方規格頁（規格表常在後段，給較多字數）
   max_output_tokens: 8000
 
   # ===== 升級成 Claude（付費，品質最好）=====

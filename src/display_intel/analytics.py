@@ -26,6 +26,41 @@ FEATURES = [
 ]
 
 
+# 規格完整度的 12 項重點欄位（標籤 → 判斷是否已知）
+KEY_FIELDS = [
+    ("尺寸", lambda r: bool(r.spec.size_inch or r.size_inferred)),
+    ("解析度", lambda r: bool(r.spec.res_w and r.spec.res_h)),
+    ("面板技術", lambda r: bool(r.spec.panel_tech)),
+    ("刷新率", lambda r: bool(r.spec.refresh_hz)),
+    ("亮度", lambda r: bool(r.spec.sdr_nits or r.spec.hdr_peak_nits)),
+    ("色域", lambda r: bool(r.spec.srgb_pct or r.spec.dci_p3_pct or r.spec.adobe_rgb_pct)),
+    ("面板廠", lambda r: bool(r.maker)),
+    ("面板型號", lambda r: bool(r.spec.panel_model)),
+    ("反應時間", lambda r: bool(r.spec.response_ms)),
+    ("調光方式", lambda r: bool(r.spec.dimming or r.spec.pwm_hz or r.spec.eye_care)),
+    ("表面處理", lambda r: bool(r.spec.surface)),
+    ("色準或 HDR", lambda r: bool(r.spec.delta_e or r.spec.certifications or r.spec.hdr_formats)),
+]
+
+
+def missing_fields(rec: PanelRecord) -> list[str]:
+    return [label for label, known in KEY_FIELDS if not known(rec)]
+
+
+def completeness(rec: PanelRecord) -> tuple[int, int]:
+    """回傳（已知項數, 總項數）。"""
+    total = len(KEY_FIELDS)
+    return total - len(missing_fields(rec)), total
+
+
+def to_fill(records: list[PanelRecord], now: datetime, days: int = 45, top: int = 5) -> list[dict]:
+    """待補清單：近期機型中，重點欄位缺最多的幾款。"""
+    recent = [r for r in records if r.first_seen >= now - timedelta(days=days) and r.confidence.rank >= Confidence.C.rank]
+    recent.sort(key=lambda r: (completeness(r)[0], -r.first_seen.timestamp()))
+    return [{"name": f"{r.spec.brand} {r.spec.model}", "score": "%d/%d" % completeness(r),
+             "missing": "、".join(missing_fields(r)[:6])} for r in recent[:top]]
+
+
 def _low(v) -> str:
     if isinstance(v, list):
         return " ".join(map(str, v)).lower()
@@ -80,6 +115,10 @@ def kpis(rows: list[dict]) -> list[dict]:
         out.append({"label": "供貨最多面板廠", "value": "—", "note": "本期報導未提及"})
     out.append({"label": "刷新率中位數", "value": f"{median(refresh):g}Hz" if refresh else "—",
                 "note": f"{len(refresh)} 款有標示" if refresh else "資料不足"})
+    if recs:
+        scores = [completeness(r) for r in recs]
+        avg = sum(k for k, _ in scores) / sum(t for _, t in scores)
+        out.append({"label": "平均規格完整度", "value": f"{avg:.0%}", "note": f"每款 {scores[0][1]} 項重點規格"})
     return out
 
 

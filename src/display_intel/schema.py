@@ -165,6 +165,9 @@ class PanelRecord(BaseModel):
     panel_maker_inferred: Optional[str] = None
     size_inferred: Optional[float] = None
     flags: list[str] = Field(default_factory=list)  # 查核發現的問題
+    # 規格補完紀錄
+    enrich_attempts: int = 0
+    last_enriched: Optional[datetime] = None
 
     @property
     def maker(self) -> Optional[str]:

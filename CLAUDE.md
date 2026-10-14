@@ -18,14 +18,15 @@ derive.py   衍生規格（PPI、長寬比、像素密度）、合理性檢查�
 llm.py      AI 介面：gemini（預設免費）/ anthropic，內建節流與額度保護；GitHub Models 已於 2026-07-30 停止服務
 db.py       SQLite（data/intel.sqlite，由 GitHub Actions commit 回 repo）
 report.py   未報告事件 → HTML Email（templates/report.html.j2，卡片式、手機友善）＋ Excel
-analytics.py 關鍵數字、亮點、週對週、技術提及率、品牌×面板廠、傳聞追蹤、名詞辭典（全部程式計算，不經 AI）
+analytics.py 規格完整度（12 項重點欄位）、關鍵數字、亮點、週對週、技術提及率、品牌×面板廠、傳聞追蹤、名詞辭典（全部程式計算，不經 AI）
+enrich.py   規格補完：挑缺重點欄位的近期機型 → Tavily 搜尋規格頁/評測 → focus 模式萃取 → 合併（每款最多 3 次）
 panel_decode.py 面板型號前綴 → 面板廠與尺寸（標示「推算」）、面板廠名稱統一
 mailer.py   Gmail SMTP（應用程式密碼）
 __main__.py 總控：collect / report / run / check-sources / test-email / demo
 demo.py     虛構範例資料，不需金鑰即可產生報告
 ```
 
-排程（`.github/workflows/`）：`collect.yml` 每天 19:17 台灣時間（週一至六 light、週日 full，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
+排程（`.github/workflows/`）：`collect.yml` 週一、三、五、日 19:17 台灣時間（一三五 light、週日 full、手動可選 enrich，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
 
 ## 核心規則（修改時務必維持）
 

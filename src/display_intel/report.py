@@ -87,7 +87,9 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     derived = "・".join(x for x in [f"{rec.ppi:g} PPI" if rec.ppi else "", rec.aspect_ratio or "",
                                     f"像素密度{rec.density_class}" if rec.density_class else ""] if x)
     change_text = "；".join(f"{FIELD_LABELS.get(k, k)}：{_fmt(o) or '—'} → {_fmt(n)}" for k, (o, n) in (changes or {}).items())
+    known, total = analytics.completeness(rec)
     return {
+        "score": f"{known}/{total}", "score_pct": round(known / total * 100), "missing": "、".join(analytics.missing_fields(rec)),
         "key": rec.key, "rec": rec, "brand": s.brand or "", "model": s.model or "",
         "screen": screen, "bright": bright, "panel": panel or "面板來源待確認", "panel_known": bool(panel),
         "extras": extras, "derived": derived, "tags": tags or [],
@@ -162,8 +164,10 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "mentions": analytics.tech_mentions(all_records, period_start),
         "matrix": analytics.brand_maker_matrix(all_records),
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
+        "to_fill": analytics.to_fill(all_records, today),
         "panel_known": sum(1 for c in new_panels if c["panel_known"]),
     }
+    ctx["kpis"].append({"label": "規格更新", "value": str(len(updates) + len(confirmed)), "note": "款補到新規格"})
     ctx["ongoing"] = ongoing(db, cfg, ctx)
     ctx["weekly"] = weekly
     ctx["title"] = "筆電顯示器情報週報" if weekly else "筆電顯示器情報日報"

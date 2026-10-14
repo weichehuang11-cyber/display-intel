@@ -389,3 +389,74 @@ def test_analytics_blocks():
     assert set(m["makers"]) == {"Samsung Display", "BOE"} and m["inferred"] == 1
     assert [t["name"] for t in analytics.rumor_tracker(recs, utcnow())] == ["Apple D"]
     assert analytics.week_over_week(recs[:2], start) is None  # 沒有上期資料
+
+
+# ---------- 規格補完 ----------
+
+def test_completeness_and_candidates(db):
+    from display_intel import analytics, enrich
+    sparse = _rec("s", 2, brand="HP", model="OmniBook 5", panel_tech="OLED")
+    rich = _rec("r", 2, brand="ASUS", model="ProArt P16", panel_tech="OLED", size_inch=16, res_w=3840, res_h=2400,
+                refresh_hz=120, sdr_nits=500, dci_p3_pct=100, panel_maker="Samsung Display", panel_model="ATNA60",
+                response_ms=0.2, dimming="DC", surface="glossy", delta_e=1)
+    rumor = _rec("d", 2, Confidence.D, brand="Apple", model="MacBook Pro")
+    old = _rec("o", 90, brand="HP", model="Old")
+    assert analytics.completeness(rich) == (12, 12) and analytics.completeness(sparse)[0] == 1
+    for r in (sparse, rich, rumor, old):
+        db.put_panel(r)
+    col = {"enrich_min_missing": 4, "enrich_within_days": 45}
+    assert [r.key for r in enrich.candidates(db, col)] == ["s"]
+    sparse.enrich_attempts, sparse.last_enriched = 1, sparse.first_seen
+    db.put_panel(sparse)
+    from display_intel.db import utcnow
+    sparse.last_enriched = utcnow()
+    db.put_panel(sparse)
+    assert enrich.candidates(db, {**col, "enrich_retry_days": 6}) == []  # 剛補查過
+
+
+def test_enrich_end_to_end(db, monkeypatch):
+    import httpx
+    from display_intel import enrich as enr
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-fake")
+    rec = _rec("x", 1, brand="HP", model="OmniBook 5", panel_tech="OLED")
+    db.put_panel(rec)
+    page = ("HP OmniBook 5 review. The OmniBook 5 has a 14-inch 1920x1200 OLED panel from Samsung Display "
+            "with 400 nits and 100% DCI-P3. The Acme X1 has a 4K screen. ") * 3
+
+    def handler(req):
+        return httpx.Response(200, json={"results": [
+            {"url": "https://www.notebookcheck.net/HP-OmniBook-5-review.1.0.html", "title": "HP OmniBook 5 review",
+             "content": "review", "raw_content": page},
+            {"url": "https://other.com/acme", "title": "Acme X1", "content": "x", "raw_content": "Acme X1 laptop " * 100}]})
+
+    real_client = httpx.Client
+    monkeypatch.setattr(enr.httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler)))
+    reply = {"results": [{"article_id": 1, "relevant": True, "panels": [
+        {"brand": "HP", "model": "OmniBook 5", "panel_tech": "OLED", "panel_maker": "Samsung Display",
+         "size_inch": 14, "res_w": 1920, "res_h": 1200, "sdr_nits": 400, "dci_p3_pct": 100,
+         "evidence": {"panel_tech": "OLED panel", "panel_maker": "Samsung Display", "size_inch": "14-inch",
+                      "res_w": "1920x1200", "res_h": "1920x1200", "sdr_nits": "400 nits", "dci_p3_pct": "100% DCI-P3"}},
+        {"brand": "Acme", "model": "X1", "res_w": 3840, "evidence": {}}]}]}
+    cfg = {"collection": {"enrich_min_missing": 4}, "llm": {"max_chars_per_call": 50000, "max_chars_per_article": 3000,
+                                                            "max_chars_per_review": 8000}}
+    stats = enr.enrich(db, cfg, FakeLLM([reply]), limit=5)
+    assert stats["searched"] == 1 and stats["pages"] == 1  # 沒提到 OmniBook 5 的頁面被過濾
+    assert stats["improved"] == 1 and stats["fields_added"] >= 4
+    recs = db.all_panels()
+    assert len(recs) == 1 and recs[0].maker == "Samsung Display" and recs[0].confidence == Confidence.B
+    assert recs[0].enrich_attempts == 1
+    assert any(e["kind"] == "updated" for e in db.unreported_events())
+
+
+def test_profiles_schedule():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from display_intel.config import apply_profile, load_config
+    cfg = load_config()
+    tz = ZoneInfo("Asia/Taipei")
+    apply_profile(cfg, datetime(2026, 10, 14, 19, 17, tzinfo=tz))  # 週三
+    assert cfg["run"]["profile"] == "light" and cfg["run"]["tavily_days"] == 2 and len(cfg["run"]["tavily_queries"]) == 10
+    apply_profile(cfg, datetime(2026, 10, 18, 19, 17, tzinfo=tz))  # 週日
+    assert cfg["run"]["profile"] == "full" and cfg["run"]["extract_model"] and cfg["run"]["enrich_models"] == 15
+    apply_profile(cfg, profile="enrich")
+    assert cfg["run"]["collect_news"] is False and cfg["run"]["tavily_queries"] == []
