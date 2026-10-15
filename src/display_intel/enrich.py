@@ -213,23 +213,149 @@ def apply_panel_specs(db: DB, rec: PanelRecord, values: dict, url: str) -> dict:
     return changes
 
 
+# ---------- 關注機型 ----------
+
+def watch_items(cfg: dict) -> list[dict]:
+    out = []
+    for it in cfg.get("watchlist") or []:
+        if not isinstance(it, dict) or not it.get("brand") or not it.get("model"):
+            continue
+        brand, model = str(it["brand"]).strip(), str(it["model"]).strip()
+        names = [model] + [str(a) for a in it.get("aliases") or []]
+        out.append({"name": f"{brand} {model}", "brand": brand, "model": model,
+                    "keys": [verify._norm(n) for n in names if verify._norm(n)], "lang": it.get("lang", "en")})
+    return out
+
+
+def watch_matches(item: dict, spec: PanelSpec) -> bool:
+    """規格是否屬於這個關注機型：品牌相同，且機型名稱包含系列名稱或其他寫法。"""
+    b = verify._norm(spec.brand)
+    if not b or not (b.startswith(verify._norm(item["brand"])) or verify._norm(item["brand"]).startswith(b)):
+        return False
+    m = verify.model_norm(spec)
+    return any(k in m for k in item["keys"])
+
+
+def watch_due(db: DB, cfg: dict, now=None) -> list[dict]:
+    now = now or utcnow()
+    every = timedelta(days=(cfg.get("collection") or {}).get("watch_refresh_days", 30))
+    due = []
+    for it in watch_items(cfg):
+        last = db.watch_last_checked(it["name"])
+        if last is None or now - last >= every:
+            due.append((last is not None, last or now, it))
+    due.sort(key=lambda x: (x[0], x[1]))  # 從沒查過的優先，其次是最久沒查的
+    return [it for _, _, it in due]
+
+
+def search_watch(client: httpx.Client, item: dict, budget: TavilyBudget) -> list[RawArticle]:
+    """關注機型搜尋 2 次：評測＋官方（中文機型改用中文查詢）。只保留內文提到該系列的頁面。"""
+    brand_key = item["brand"].lower()
+    if item["lang"] == "zh":
+        zh_brand = {"mechrevo": "机械革命"}.get(brand_key, item["brand"])
+        searches = [(f"{zh_brand} {item['model']} 屏幕 参数 评测", None), (f"{zh_brand} {item['model']} 笔记本 规格 刷新率", None)]
+    else:
+        searches = [(f"{item['name']} review display panel", REVIEW_DOMAINS),
+                    (f"{item['name']} specifications display touchscreen", BRAND_DOMAINS.get(brand_key))]
+    out, seen = [], set()
+    for query, domains in searches:
+        try:
+            items = _tavily(client, budget, query, 5, domains)
+        except BudgetExceeded:
+            raise
+        except Exception as exc:
+            log.warning("關注機型搜尋失敗 %s：%s", query, exc)
+            continue
+        for r in items:
+            raw = r.get("raw_content") or ""
+            text = verify._norm(f"{r.get('title', '')} {r.get('content', '')} {raw[:30000]}")
+            url = canonical_url(r["url"])
+            if url in seen or not any(k in text for k in item["keys"]):
+                continue
+            seen.add(url)
+            out.append(RawArticle(url=url, title=r.get("title", ""), source=urlsplit(r["url"]).netloc,
+                                  source_type=source_type_for(r["url"], r.get("title", ""), item["brand"]),
+                                  lang="zh-CN" if item["lang"] == "zh" else "en", summary=r.get("content", "")[:2000],
+                                  content=raw, content_level="full" if len(raw) > 800 else "snippet"))
+    out.sort(key=lambda a: {"official": 0, "review": 1}.get(a.source_type, 2))
+    return out[:4]
+
+
+def tag_watch_records(db: DB, item: dict) -> int:
+    """標記屬於這個關注機型的紀錄。剛建檔的紀錄視為已做過第一次補查，避免同一次執行重複搜尋。"""
+    n = 0
+    for r in db.all_panels():
+        if not watch_matches(item, r.spec):
+            continue
+        n += 1
+        changed = r.watch != item["name"]
+        r.watch = item["name"]
+        if r.enrich_attempts == 0:
+            r.enrich_attempts, r.last_enriched, changed = 1, utcnow(), True
+        if changed:
+            db.put_panel(r)
+    return n
+
+
+def seed_watchlist(db: DB, cfg: dict, llm: LLM, client: httpx.Client, budget: TavilyBudget, limit: int,
+                   should_stop: Callable[[], bool], stats: dict):
+    """幫到期的關注機型建檔或回查。"""
+    seen = db.seen_urls()
+    for item in watch_due(db, cfg)[:limit]:
+        if should_stop():
+            stats["stopped"] = "已到收工時間"
+            return
+        tag_watch_records(db, item)  # 已經因新聞收錄的機型，先標記
+        pages = [p for p in search_watch(client, item, budget) if p.url not in seen]
+        stats["watch_checked"] += 1
+        found = 0
+        if pages:
+            results, ex_stats = extract_all(pages, llm, cfg["llm"], should_stop, focus=item["name"])
+            kept = []
+            for article, ex, flags in results:
+                ex.panels = [p for p in ex.panels if watch_matches(item, p)]
+                ex.platform_techs, ex.fabs, ex.industry_note = [], [], None
+                if ex.panels:
+                    kept.append((article, ex, flags))
+                    found += len(ex.panels)
+            verify.ingest(db, kept, tag="watch")
+            for p in ex_stats.get("processed", []):
+                db.add_article(p.url, p.title, p.source)
+                seen.add(p.url)
+            if ex_stats.get("stopped"):
+                stats["stopped"] = ex_stats["stopped"]
+                db.mark_watch_checked(item["name"], found)
+                return
+        tagged = tag_watch_records(db, item)
+        db.mark_watch_checked(item["name"], found)
+        if found:
+            stats["watch_found"] += 1
+            stats["details"].append(f"關注機型 {item['name']}：找到 {found} 筆螢幕規格")
+        elif not tagged:
+            stats["details"].append(f"關注機型 {item['name']}：這次沒找到規格頁")
+
+
 # ---------- 主流程 ----------
 
 def enrich(db: DB, cfg: dict, llm: LLM, limit: int, should_stop: Callable[[], bool] = lambda: False) -> dict:
     """補完最多 limit 款機型。回傳統計。"""
     col = cfg.get("collection") or {}
     stats = {"candidates": 0, "searched": 0, "tavily": 0, "pages": 0, "improved": 0, "fields_added": 0,
-             "panel_lookups": 0, "stopped": "", "details": []}
+             "panel_lookups": 0, "watch_checked": 0, "watch_found": 0, "stopped": "", "details": []}
     if limit <= 0 or not env("TAVILY_API_KEY"):
         stats["stopped"] = "未設定 TAVILY_API_KEY 或補完數量為 0"
         return stats
     budget = TavilyBudget(db, col.get("enrich_monthly_cap", 850))
     used_before = db.usage("tavily")
-    todo = candidates(db, col)
-    stats["candidates"] = len(todo)
-    seen = db.seen_urls()
     with httpx.Client(timeout=httpx.Timeout(40.0), headers={"User-Agent": UA}) as client:
         try:
+            # 關注機型先建檔（新建的紀錄接著會進入下方的一般補完流程）
+            watch_limit = col.get("watch_per_run", 5) * (2 if (cfg.get("run") or {}).get("profile") in ("full", "enrich") else 1)
+            if watch_items(cfg) and watch_limit:
+                seed_watchlist(db, cfg, llm, client, budget, watch_limit, should_stop, stats)
+            todo = candidates(db, col)
+            stats["candidates"] = len(todo)
+            seen = db.seen_urls()
             for group in todo[:limit]:
                 if should_stop():
                     stats["stopped"] = "已到收工時間"

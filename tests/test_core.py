@@ -607,3 +607,78 @@ def test_platform_name_cleanup():
     s = normalize_identity(PanelSpec(brand="ASUS", model="X", cpu_platform="Intel® Core™ Ultra 9 Processor 386H",
                                      gpu="NVIDIA® GeForce RTX™ 5070 Laptop GPU"))
     assert s.cpu_platform == "Intel Core Ultra 9 386H" and s.gpu == "NVIDIA GeForce RTX 5070 Laptop GPU"
+
+
+# ---------- 關注機型 ----------
+
+def test_watch_matching_and_due(db):
+    from datetime import timedelta
+    from display_intel import enrich as enr
+    from display_intel.db import utcnow
+    from display_intel.extract import normalize_identity
+    cfg = {"watchlist": [{"brand": "LG", "model": "gram 17"},
+                         {"brand": "Mechrevo", "model": "蛟龙", "aliases": ["蛟龍", "Jiaolong"], "lang": "zh"},
+                         {"brand": "bad"}], "collection": {"watch_refresh_days": 30}}
+    items = enr.watch_items(cfg)
+    assert [i["name"] for i in items] == ["LG gram 17", "Mechrevo 蛟龙"]
+    lg, mr = items
+    assert enr.watch_matches(lg, normalize_identity(PanelSpec(brand="LG Electronics", model="LG gram 17 (17Z90U)")))
+    assert not enr.watch_matches(lg, PanelSpec(brand="LG", model="gram 16"))
+    s = normalize_identity(PanelSpec(brand="机械革命", model="机械革命 蛟龙16 Pro"))
+    assert s.brand == "Mechrevo" and s.model == "蛟龙16 Pro" and enr.watch_matches(mr, s)
+    assert enr.watch_matches(mr, PanelSpec(brand="Mechrevo", model="Jiaolong 16K"))
+    assert [i["name"] for i in enr.watch_due(db, cfg)] == ["LG gram 17", "Mechrevo 蛟龙"]
+    db.mark_watch_checked("LG gram 17", 2)
+    assert [i["name"] for i in enr.watch_due(db, cfg)] == ["Mechrevo 蛟龙"]
+    assert len(enr.watch_due(db, cfg, now=utcnow() + timedelta(days=31))) == 2
+
+
+def test_seed_watchlist(db, monkeypatch):
+    import httpx
+    from display_intel import enrich as enr
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-fake")
+    page = "LG gram 17 review: the gram 17 has a 17-inch 2560x1600 IPS display with 350 nits and is not a touchscreen. " * 3
+
+    def handler(req):
+        return httpx.Response(200, json={"results": [
+            {"url": "https://www.lg.com/us/laptops/gram-17", "title": "LG gram 17", "content": "x", "raw_content": page}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(enr.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler)))
+    reply = {"results": [{"article_id": 1, "relevant": True, "panels": [
+        {"brand": "LG", "model": "gram 17", "size_inch": 17, "res_w": 2560, "res_h": 1600, "panel_tech": "IPS LCD",
+         "sdr_nits": 350, "touch": False,
+         "evidence": {"size_inch": "17-inch", "res_w": "2560x1600", "res_h": "2560x1600", "panel_tech": "IPS display",
+                      "sdr_nits": "350 nits", "touch": "not a touchscreen"}}]}]}
+    cfg = {"watchlist": [{"brand": "LG", "model": "gram 17"}],
+           "collection": {"watch_per_run": 5, "enrich_target": 10}, "run": {"profile": "light"},
+           "llm": {"max_chars_per_call": 50000, "max_chars_per_article": 3000}}
+    stats = enr.enrich(db, cfg, FakeLLM([reply]), limit=0 + 5)
+    assert stats["watch_checked"] == 1 and stats["watch_found"] == 1
+    recs = db.all_panels()
+    assert len(recs) == 1 and recs[0].watch == "LG gram 17" and recs[0].confidence == Confidence.A
+    assert recs[0].spec.touch is False and recs[0].enrich_attempts == 1
+    assert stats["searched"] == 0  # 剛建檔的不會在同一次重複補查
+    ev = db.unreported_events()
+    assert ev and ev[0]["payload"].get("tag") == "watch"
+    assert db.usage("tavily") == 2
+
+
+def test_watch_report_section(db, tmp_path):
+    from display_intel.report import build_report
+    a = art("LG gram 17", "LG gram 17 has a 17-inch 2560x1600 IPS display.", source_type="official")
+    ex = Extraction(relevant=True, panels=[PanelSpec(brand="LG", model="gram 17", size_inch=17, res_w=2560, res_h=1600,
+                                                     evidence={"size_inch": "17-inch", "res_w": "2560x1600", "res_h": "2560x1600"})])
+    verify.ingest(db, [(a, ex, [])], tag="watch")
+    b = art("HP OmniBook 5 launch", "HP OmniBook 5 laptop has a 14-inch OLED display.", source_type="official")
+    verify.ingest(db, [(b, Extraction(relevant=True, panels=[PanelSpec(brand="HP", model="OmniBook 5", size_inch=14,
+                                                                        evidence={"size_inch": "14-inch"})]), [])])
+    cfg = {"schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)},
+           "watchlist": [{"brand": "LG", "model": "gram 17"}, {"brand": "Razer", "model": "Blade 16"}]}
+    ctx, html, xlsx, _ = build_report(db, cfg)
+    assert [c["model"] for c in ctx["new_panels"]] == ["OmniBook 5"]  # 關注清單建檔的不算新機
+    rows = {w["name"]: w for w in ctx["watch"]}
+    assert rows["LG gram 17"]["updated"] and rows["LG gram 17"]["score"].startswith("2/")
+    assert rows["Razer Blade 16"]["status"] == "排隊建檔中"
+    import openpyxl
+    assert "關注機型" in openpyxl.load_workbook(xlsx).sheetnames and "關注機型（2）" in html

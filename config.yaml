@@ -37,6 +37,8 @@ collection:
   enrich_schedule_days: [0, 14, 35]   # 補查時間：第一次立刻查，之後在上市第 14、35 天再查（配合評測出現）
   enrich_retry_days: 6                # 兩次補查至少間隔幾天
   enrich_within_days: 60              # 只補查 60 天內出現的機型
+  watch_per_run: 5                    # 每次蒐集最多幫幾款「關注機型」建檔或回查（週日加倍）
+  watch_refresh_days: 30              # 關注機型每隔幾天回查一次（抓新款與規格更新）
   enrich_monthly_cap: 850             # Tavily 當月用到這個數字就暫停補查（保留餘裕給臨時需求）
   tavily_monthly_hard_cap: 950        # 新聞搜尋也停止的上限（免費額度 1,000）
   # 展會月自動加碼：1 月 CES、5–6 月 Computex、9 月 IFA
@@ -104,7 +106,7 @@ sources:
     queries:
       en: ["laptop OLED display", "laptop display panel", "notebook Mini LED", "laptop 240Hz display", "IT OLED fab", "G-SYNC laptop", "FreeSync laptop display"]
       zh-TW: ["筆電 OLED 螢幕", "筆電 面板", "OLED 世代線"]
-      zh-CN: ["笔记本 OLED 屏幕", "笔记本 屏幕 面板", "OLED 8.6代线"]
+      zh-CN: ["笔记本 OLED 屏幕", "笔记本 屏幕 面板", "OLED 8.6代线", "机械革命 屏幕"]
       ja: ["ノートPC 有機EL", "ノートPC 液晶"]
       ko: ["노트북 OLED", "IT OLED 8.6세대"]
 
@@ -159,6 +161,7 @@ sources:
       - "筆電 面板 友達 群創"
       - "笔记本 屏幕 刷新率 面板"
       - "笔记本 OLED 京东方 维信诺"
+      - "机械革命 笔记本 屏幕 参数"
       - "ノートPC 有機EL ディスプレイ"
       - "노트북 OLED 디스플레이"
       # --- 傳聞 ---
@@ -176,6 +179,47 @@ sources:
       - "AIO PC announced display"
       - "notebook panel showcase OLED"
       - "展會 筆電 螢幕"
+
+# 關注機型清單：不論這週有沒有新聞，都會主動建立並追蹤完整規格
+# 格式：品牌（brand）＋ 機型系列（model）；aliases 是其他寫法；lang: zh 代表用中文搜尋
+# 新增或刪除機型：照格式加一行即可。每款第一次建檔約用 2 次 Tavily，之後每月回查一次
+watchlist:
+  # --- LG ---
+  - {brand: LG, model: gram 17}
+  - {brand: LG, model: gram 16}
+  - {brand: LG, model: gram Pro 16}
+  # --- Apple ---
+  - {brand: Apple, model: MacBook Air 13}
+  - {brand: Apple, model: MacBook Air 15}
+  - {brand: Apple, model: MacBook Pro 14}
+  - {brand: Apple, model: MacBook Pro 16}
+  # --- Dell ---
+  - {brand: Dell, model: XPS 14}
+  # --- ASUS ---
+  - {brand: ASUS, model: Zenbook S 14}
+  - {brand: ASUS, model: ROG Zephyrus G14}
+  - {brand: ASUS, model: ROG Zephyrus G16}
+  # --- Lenovo ---
+  - {brand: Lenovo, model: ThinkPad X1 Carbon}
+  - {brand: Lenovo, model: Yoga Slim 7x}
+  - {brand: Lenovo, model: Yoga Pro 9i}
+  # --- HP ---
+  - {brand: HP, model: Spectre x360 14}
+  # --- Acer ---
+  - {brand: Acer, model: Swift Go 14}
+  - {brand: Acer, model: Predator Helios 16}
+  # --- MSI ---
+  - {brand: MSI, model: Prestige 13}
+  - {brand: MSI, model: Stealth 16}
+  # --- Razer / Microsoft ---
+  - {brand: Razer, model: Blade 16}
+  - {brand: Microsoft, model: Surface Laptop}
+  # --- 機械革命（中國）---
+  - {brand: Mechrevo, model: 蛟龙, aliases: [蛟龍, Jiaolong], lang: zh}
+  - {brand: Mechrevo, model: 极光, aliases: [極光, Jiguang], lang: zh}
+  - {brand: Mechrevo, model: 旷世, aliases: [曠世, Kuangshi], lang: zh}
+  - {brand: Mechrevo, model: 无界, aliases: [無界, Wujie], lang: zh}
+  - {brand: Mechrevo, model: 耀世, aliases: [Yaoshi], lang: zh}
 
 # 文章初篩關鍵字（不分大小寫）。標題或摘要需「同時」命中兩組才會送進 AI，節省成本。
 keywords:

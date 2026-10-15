@@ -175,6 +175,7 @@ class PanelRecord(BaseModel):
     enrich_attempts: int = 0
     last_enriched: Optional[datetime] = None
     panel_lookup_done: bool = False
+    watch: Optional[str] = None  # 屬於哪一個關注機型（config.yaml 的 watchlist）
     panel_spec_fields: list[str] = Field(default_factory=list)  # 來自面板原廠規格（非整機實測）的欄位
 
     @property

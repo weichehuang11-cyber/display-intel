@@ -91,6 +91,16 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 - 回訪時間：發現時立刻查，之後在上市第 14、35 天再查，配合評測出現的時間；達到 10/13 就停止
 - 補到的內容會出現在週報的「規格更新」；報告開頭的「上市滿 30 天完整度」就是追蹤 75% 目標的指標
 
+## 關注機型清單
+
+新聞只會帶進「這週有消息」的機型。想長期追蹤的主力機型（例如 LG gram 17、機械革命蛟龍系列），可以放進 `config.yaml` 的 `watchlist`，不論有沒有新聞都會：
+
+- 主動搜尋官方規格頁與評測，建立完整規格紀錄（中文機型用中文搜尋）
+- 每月回查一次，抓新款與規格更新；也會參與規格補完與平台適配評比
+- 週報有獨立的「關注機型」區塊，不會混進「新機型」；Excel 附件有「關注機型」工作表
+
+新增一款：在 `watchlist:` 底下照格式加一行，例如 `- {brand: Samsung, model: Galaxy Book Pro}`。中文機型可加 `aliases`（其他寫法）與 `lang: zh`。每次蒐集最多建檔 5 款（週日 10 款），清單上 26 款約 2 週內全部建檔完成。
+
 ## 平台適配性評比（Intel、NVIDIA、AMD、Qualcomm）
 
 每款機型會記錄處理器、獨立顯示卡、顯示切換方式（MUX、Advanced Optimus）與平台認證（Intel Evo、Copilot+ PC 等），並檢查螢幕與平台的搭配：
@@ -130,6 +140,7 @@ Tavily 用到 850 次時會自動暫停補完，保留至少 150 次給臨時需
 | 讓更多文章被收進來 | `keywords:` 底下加詞 |
 | 改寄送時間 | `schedule:` → `send_at`（也要同步改 `.github/workflows/report.yml` 的 cron） |
 | 調整搜尋量 | `collection:` 底下 `light`（週一三五）與 `full`（週日）的 `tavily_queries_per_run`、`enrich_models`、`max_ai_calls` |
+| 新增或刪除關注機型 | `watchlist:` 清單；每次建檔數量與回查頻率在 `collection:` 的 `watch_per_run`、`watch_refresh_days` |
 | 調整補查規則 | `collection:` 的 `enrich_target`（幾項就停）、`enrich_schedule_days`（回訪時間）、`enrich_monthly_cap`（月用量上限） |
 | 調整展會月 | `collection:` 的 `event_months` 與 `event_extra_queries_per_run` |
 | 改回每天寄日報 | `schedule:` 的 `cadence` 改成 `daily`、`send_at` 改成 `"09:30"`、`collect_deadline` 改成 `"08:35"`、`lookback_hours` 改成 `26`；兩個 workflow 檔案開頭的註解寫了要換成的 cron |

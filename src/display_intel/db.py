@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_reported ON events(reported_at);
 CREATE INDEX IF NOT EXISTS idx_events_dedup ON events(dedup_key);
+CREATE TABLE IF NOT EXISTS watch_state (
+    name TEXT PRIMARY KEY, last_checked TEXT, found INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS usage (
     month TEXT, service TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (month, service)
 );
@@ -107,6 +110,16 @@ class DB:
     def mark_reported(self, ids: list[int]):
         now = utcnow().isoformat()
         self.conn.executemany("UPDATE events SET reported_at = ? WHERE id = ?", [(now, i) for i in ids])
+
+    # ---------- 關注機型 ----------
+    def watch_last_checked(self, name: str):
+        row = self.conn.execute("SELECT last_checked FROM watch_state WHERE name = ?", (name,)).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
+
+    def mark_watch_checked(self, name: str, found: int):
+        self.conn.execute("INSERT INTO watch_state (name, last_checked, found) VALUES (?,?,?) "
+                          "ON CONFLICT(name) DO UPDATE SET last_checked = excluded.last_checked, found = excluded.found",
+                          (name, utcnow().isoformat(), found))
 
     # ---------- 外部服務月用量 ----------
     @staticmethod

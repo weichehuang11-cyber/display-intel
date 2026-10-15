@@ -134,6 +134,28 @@ def group_by_model(cards: list[dict]) -> list[dict]:
     return sorted(out, key=lambda c: (c["brand"].lower(), c["model"].lower()))
 
 
+def watch_rows(db: DB, cfg: dict, records: list[PanelRecord], updated_keys: set[str]) -> list[dict]:
+    """關注機型總覽：每個關注項目一列。"""
+    from .enrich import watch_items, watch_matches
+    rows = []
+    for item in watch_items(cfg):
+        recs = [r for r in records if watch_matches(item, r.spec) and r.confidence.rank >= Confidence.C.rank]
+        if not recs:
+            checked = db.watch_last_checked(item["name"])
+            rows.append({"name": item["name"], "models": "", "screen": "", "score": "—", "score_pct": 0, "updated": False,
+                         "status": "查無規格頁，下次回查再試" if checked else "排隊建檔中"})
+            continue
+        best = max(recs, key=lambda r: analytics.completeness(r)[0])
+        k, t = analytics.completeness(best)
+        models = list(dict.fromkeys(r.spec.model for r in recs if r.spec.model))
+        card = panel_card(best)
+        rows.append({"name": item["name"], "models": "、".join(models[:4]) + (f" 等 {len(models)} 款" if len(models) > 4 else ""),
+                     "screen": card["screen"], "score": f"{k}/{t}", "score_pct": round(k / t * 100),
+                     "updated": any(r.key in updated_keys for r in recs), "status": "",
+                     "options": len(recs), "source_url": best.source_url})
+    return rows
+
+
 def ctx_label(weekly: bool) -> str:
     return "本週" if weekly else "今日"
 
@@ -147,12 +169,15 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
     grouped: dict[str, dict] = {}
     for e in (e for e in events if e["category"] == "panel"):
         rec = _current_record(db, e)
-        g = grouped.setdefault(rec.key, {"rec": rec, "kind": e["kind"], "changes": {}})
+        g = grouped.setdefault(rec.key, {"rec": rec, "kind": e["kind"], "changes": {}, "watch_seed": False})
         if priority.get(e["kind"], 0) > priority.get(g["kind"], 0):
             g["kind"] = e["kind"]
+        if e["kind"] == "new" and e["payload"].get("tag") == "watch":
+            g["watch_seed"] = True  # 關注清單主動建檔的既有機型，不算本期新機
         g["changes"].update(e["payload"].get("changes") or {})
     all_records = db.all_panels()
-    period_new = [{"rec": g["rec"]} for g in grouped.values() if g["kind"] == "new" and g["rec"].confidence != Confidence.D]
+    period_new = [{"rec": g["rec"]} for g in grouped.values()
+                  if g["kind"] == "new" and not g["watch_seed"] and g["rec"].confidence != Confidence.D]
     standout_lines, tags = analytics.standouts(period_new, all_records, period_start)
 
     def card(g):
@@ -160,7 +185,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
 
     by_name = lambda c: (c["brand"].lower(), c["model"].lower())
     is_rumor = lambda g: g["rec"].confidence == Confidence.D
-    new_panels = sorted((card(g) for g in grouped.values() if g["kind"] == "new" and not is_rumor(g)), key=by_name)
+    new_panels = sorted((card(g) for g in grouped.values() if g["kind"] == "new" and not g["watch_seed"] and not is_rumor(g)), key=by_name)
     updates = sorted((card(g) for g in grouped.values() if g["kind"] == "updated" and not is_rumor(g)), key=by_name)
     confirmed = sorted((card(g) for g in grouped.values() if g["kind"] == "rumor_confirmed"), key=by_name)
     rumor_panels = sorted((card(g) for g in grouped.values() if is_rumor(g)), key=by_name)
@@ -203,6 +228,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
         "to_fill": analytics.to_fill(all_records, today),
         "platform_matrix": ihv.platform_matrix(all_records, today),
+        "watch": watch_rows(db, cfg, all_records, set(grouped)),
     }
     # 卡片依機型合併（螢幕選配列在同一張卡片內）
     for k in ("new_panels", "updates", "confirmed", "rumor_panels"):
@@ -366,6 +392,20 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
     if m:
         ws4 = wb.create_sheet("品牌×面板廠")
         sheet(ws4, ["品牌"] + m["makers"], [[r["brand"]] + r["cells"] for r in m["rows"]])
+    if ctx.get("watch"):
+        from .enrich import watch_items, watch_matches
+        ws7 = wb.create_sheet("關注機型")
+        items = watch_items(ctx.get("_cfg") or {})
+        rows7 = []
+        for rec in db.all_panels():
+            item = next((i for i in items if watch_matches(i, rec.spec)), None)
+            if item and rec.confidence.rank >= Confidence.C.rank:
+                rows7.append([item["name"], rec.confidence.label, "%d/%d" % analytics.completeness(rec)]
+                             + [_fmt(getattr(rec.spec, f)) for f in fields]
+                             + [rec.ppi, rec.last_updated.strftime("%Y-%m-%d"), rec.source_name, rec.source_url])
+        sheet(ws7, ["關注項目", "可信度", "完整度"] + [FIELD_LABELS[f] for f in fields] + ["PPI", "最後更新", "來源", "網址"],
+              sorted(rows7, key=lambda r: (r[0], r[4] or "")))
+        ws7.auto_filter.ref = ws7.dimensions
     ws6 = wb.create_sheet("平台適配")
     names = [i["name"] for i in ihv.evaluate(PanelSpec())]
     sheet(ws6, ["品牌", "機型", "螢幕", "處理器", "處理器平台", "顯示卡", "獨顯廠商", "顯示切換"] + names + ["說明"],
@@ -398,6 +438,7 @@ def build_report(db: DB, cfg: dict, llm=None) -> tuple[dict, str, Path, list[int
     today = datetime.now(tz)
     events = db.unreported_events()
     ctx = build_context(events, db, cfg, today)
+    ctx["_cfg"] = cfg
     ctx["highlights"] = highlights(ctx, llm)
     ctx["glossary"] = []
     html = render_html(ctx)

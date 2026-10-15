@@ -193,7 +193,7 @@ def _hash(*parts) -> str:
     return hashlib.sha1("|".join(_norm(p) for p in parts).encode()).hexdigest()[:16]
 
 
-def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]]) -> dict:
+def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]], tag: str | None = None) -> dict:
     """把萃取結果寫入資料庫並產生報告事件。回傳統計。"""
     stats = {"panel_new": 0, "panel_updated": 0, "rumor_confirmed": 0, "platform": 0, "fab": 0, "industry": 0, "merged": 0}
     for article, ex, flags in results:
@@ -201,7 +201,10 @@ def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]]) -> d
         for spec in ex.panels:
             ev = merge_panel(db, spec, conf, article, flags)
             if ev and ev.record.confidence != Confidence.E:
-                db.add_event("panel", ev.kind, ev.model_dump(mode="json"), conf.value, article.url, article.source)
+                payload = ev.model_dump(mode="json")
+                if tag:
+                    payload["tag"] = tag
+                db.add_event("panel", ev.kind, payload, conf.value, article.url, article.source)
                 stats["panel_" + ev.kind if ev.kind != "rumor_confirmed" else "rumor_confirmed"] += 1
         for t in ex.platform_techs:
             key = _hash(t.vendor, t.tech_name, t.event_type)

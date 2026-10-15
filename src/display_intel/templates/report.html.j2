@@ -78,6 +78,22 @@
   {% for c in confirmed %}{{ card(c, True) }}{% endfor %}
   {% endif %}
 
+  {% if watch %}
+  {{ h2("關注機型（" ~ watch|length ~ "）", "#0f766e") }}
+  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">不論有沒有新聞都會追蹤；每月回查一次。完整規格見附件 Excel「關注機型」工作表。</div>
+  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#e6f4f1;text-align:left;"><th>機型</th><th>螢幕</th><th>規格</th></tr>
+    {% for w in watch %}
+    <tr style="border-top:1px solid #e3e6ea;vertical-align:top;">
+      <td><b>{{ w.name }}</b>{% if w.updated %} <span style="font-size:11px;color:#1e7d4f;">● {{ period_label }}有更新</span>{% endif %}
+        {% if w.models %}<div style="font-size:11px;color:#999;">{{ w.models }}</div>{% endif %}</td>
+      <td>{% if w.status %}<span style="color:#999;">{{ w.status }}</span>{% else %}{{ w.screen }}{% endif %}</td>
+      <td style="white-space:nowrap;color:{% if w.score_pct >= 70 %}#1e7d4f{% elif w.score_pct >= 40 %}#8a6100{% else %}#999{% endif %};">{{ w.score }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
   {% if platform %}
   {{ h2("平台技術動態（" ~ platform|length ~ "）") }}
   {% for r in platform %}

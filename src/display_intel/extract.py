@@ -148,10 +148,17 @@ BRAND_CANON = {b.lower(): b for b in [
     "Medion", "Dynabook", "Fujitsu", "VAIO", "Panasonic", "Google", "Infinix", "Tecno", "Chuwi"]}
 
 
+BRAND_ALIASES = {"机械革命": "Mechrevo", "機械革命": "Mechrevo", "lg electronics": "LG", "樂金": "LG",
+                 "华硕": "ASUS", "華碩": "ASUS", "联想": "Lenovo", "聯想": "Lenovo", "惠普": "HP", "戴尔": "Dell", "戴爾": "Dell",
+                 "宏碁": "Acer", "微星": "MSI", "苹果": "Apple", "蘋果": "Apple", "华为": "Huawei", "華為": "Huawei",
+                 "小米": "Xiaomi", "荣耀": "Honor", "榮耀": "Honor", "雷神": "Thunderobot", "机械师": "Machenike"}
+
+
 def normalize_identity(spec: PanelSpec) -> PanelSpec:
     """統一品牌大小寫（Asus → ASUS），並去掉機型名稱開頭重複的品牌（Framework Framework Laptop 12）。"""
     data = spec.model_dump()
     brand = (spec.brand or "").strip()
+    brand = BRAND_ALIASES.get(brand.lower(), BRAND_ALIASES.get(brand, brand))
     first = brand.split()[0].lower() if brand else ""
     if brand.lower() in BRAND_CANON:
         brand = BRAND_CANON[brand.lower()]
@@ -160,6 +167,9 @@ def normalize_identity(spec: PanelSpec) -> PanelSpec:
     model = (spec.model or "").strip()
     if brand and model.lower().startswith(brand.lower() + " "):
         model = model[len(brand) + 1:].strip()
+    for alias, canon in BRAND_ALIASES.items():  # 機型開頭重複中文品牌名，例如「机械革命 蛟龙16」
+        if canon == brand and model.startswith(alias):
+            model = model[len(alias):].strip()
     data["brand"], data["model"] = brand or None, model or None
     # 平台名稱去掉 ®™ 等符號，讓報告好讀（例如「Intel® Core™ Ultra 9 Processor 386H」→「Intel Core Ultra 9 386H」）
     for f in ("cpu_platform", "gpu"):
