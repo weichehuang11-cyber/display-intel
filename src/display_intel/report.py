@@ -82,6 +82,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     maker_txt = (f"{maker}（由型號推算）" if rec.panel_maker_inferred else maker) if maker else ""
     panel = " ".join(x for x in [maker_txt, s.panel_model or ""] if x)
     extras = "・".join(x for x in [
+        f"品牌命名：{s.display_marketing_name}" if s.display_marketing_name else "",
         _fmt(s.vrr_tech), f"Mini LED {s.mini_led_zones} 區" if s.mini_led_zones else "",
         f"{s.dimming} 調光" if s.dimming else "", f"PWM {s.pwm_hz:g}Hz" if s.pwm_hz else "",
         _fmt(s.low_power_tech), _fmt(s.display_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),

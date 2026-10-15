@@ -71,6 +71,7 @@ class PanelSpec(BaseModel):
     panel_maker: Optional[str] = Field(None, description="面板廠，例如 BOE、Samsung Display")
     panel_model: Optional[str] = Field(None, description="面板型號，例如 NE160QDM-NZ1")
     panel_tech: Optional[str] = Field(None, description="IPS LCD / VA LCD / Mini LED LCD / OLED / Tandem OLED 等")
+    display_marketing_name: Optional[str] = Field(None, description="品牌的螢幕行銷名稱，例如 ASUS Lumina OLED、Lenovo PureSight")
     # 基本
     size_inch: Optional[float] = None
     res_w: Optional[int] = Field(None, description="水平像素")

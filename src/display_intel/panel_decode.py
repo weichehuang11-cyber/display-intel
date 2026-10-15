@@ -40,7 +40,16 @@ MAKER_ALIASES = {
     "Visionox": ["visionox", "維信諾", "维信诺"],
     "Everdisplay": ["everdisplay", "edo", "和輝", "和辉"],
     "JDI": ["jdi", "japan display"],
+    "InfoVision": ["infovision", "ivo", "龍騰", "龙腾"],
+    "HKC": ["hkc", "惠科"],
+    "CEC Panda": ["cec panda", "熊貓", "熊猫"],
 }
+
+KNOWN_MAKERS = set(MAKER_ALIASES)
+
+# EDID 面板識別碼（3 個字母廠商代碼＋4 位十六進位），評測網站常以這種格式標示，例如 BOE0AAE、SDC4189
+EDID_VENDORS = {"BOE": "BOE", "AUO": "AUO", "SDC": "Samsung Display", "LGD": "LG Display", "CMN": "Innolux",
+                "SHP": "Sharp", "CSO": "CSOT", "IVO": "InfoVision", "TMA": "Tianma", "NCP": "Visionox"}
 
 
 def canonical_maker(name: Optional[str]) -> Optional[str]:
@@ -62,6 +71,9 @@ def decode(panel_model: Optional[str]) -> Optional[dict]:
     if not panel_model:
         return None
     m_str = re.sub(r"[\s\-]", "", panel_model.upper())
+    edid = re.fullmatch(r"([A-Z]{3})([0-9A-F]{4})", m_str)
+    if edid and edid.group(1) in EDID_VENDORS:
+        return {"maker": EDID_VENDORS[edid.group(1)], "size_inch": None}
     for pattern, maker, size_mode in RULES:
         m = re.match(pattern, m_str)
         if not m:

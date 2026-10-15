@@ -682,3 +682,19 @@ def test_watch_report_section(db, tmp_path):
     assert rows["Razer Blade 16"]["status"] == "排隊建檔中"
     import openpyxl
     assert "關注機型" in openpyxl.load_workbook(xlsx).sheetnames and "關注機型（2）" in html
+
+
+def test_panel_source_strict():
+    from display_intel.extract import fix_panel_source
+    from display_intel.panel_decode import decode
+    s, f = fix_panel_source(PanelSpec(brand="ASUS", model="ProArt P16", panel_maker="ASUS Lumina Pro OLED",
+                                      panel_model="Lumina Pro OLED"))
+    assert s.panel_maker is None and s.panel_model is None and s.display_marketing_name == "ASUS Lumina Pro OLED"
+    s, _ = fix_panel_source(PanelSpec(brand="LG", model="gram 17", panel_maker="LG Display"))
+    assert s.panel_maker == "LG Display"  # LG 筆電用 LG Display 面板，不可誤刪
+    s, _ = fix_panel_source(PanelSpec(brand="Samsung", model="Galaxy Book", panel_maker="Samsung"))
+    assert s.panel_maker is None
+    s, _ = fix_panel_source(PanelSpec(brand="Lenovo", model="X", panel_maker="PureSight"))
+    assert s.panel_maker is None
+    s, _ = fix_panel_source(PanelSpec(brand="HP", model="OMEN 16", panel_maker="BOE", panel_model="BOE0AAE"))
+    assert s.panel_model == "BOE0AAE" and decode("BOE0AAE")["maker"] == "BOE" and decode("SDC4189")["maker"] == "Samsung Display"

@@ -38,13 +38,15 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
     DPST（Display Power Saving Technology，含版本）、OPST、PSR／PSR2（Panel Self Refresh）、Panel Replay、DRRS／SDRRS、AMD Vari-Bright。要附原文。
 9. panels 只收「有品牌且有具體機型名稱」的產品；只說「某品牌新筆電」而沒有機型名稱的，不要列。
 10. panel_maker 只填面板製造商（如 BOE、Samsung Display、LG Display、AUO、Innolux、CSOT、Sharp），不可填筆電品牌。
-11. panel_model 只填面板料號（如 NE160QDM-NY1、ATNA60CL10），行銷名稱（如 Lumina OLED、Nebula Display）不要填。"""
+11. panel_model 只填面板料號（如 NE160QDM-NY1、ATNA60CL10、BOE0AAE）。
+    品牌的螢幕行銷名稱（如 ASUS Lumina OLED、Lenovo PureSight、Dell InfinityEdge）填在 display_marketing_name，
+    不可填進 panel_maker 或 panel_model；行銷名稱不代表面板製造商。"""
 
 FIELD_GUIDE = """輸出格式：
 {"results": [ { "article_id": 1, "relevant": true/false, "is_rumor": true/false,
   "panels": [ {
     "brand","model","product_type"(laptop|notebook|aio),
-    "panel_maker","panel_model","panel_tech"(IPS LCD|VA LCD|Mini LED LCD|OLED|Tandem OLED|其他),
+    "panel_maker","panel_model","panel_tech"(IPS LCD|VA LCD|Mini LED LCD|OLED|Tandem OLED|其他),"display_marketing_name",
     "size_inch","res_w","res_h","surface",
     "sdr_nits","hdr_peak_nits","contrast","srgb_pct","dci_p3_pct","adobe_rgb_pct","color_depth_bit","delta_e",
     "hdr_formats":[],"certifications":[],
@@ -181,28 +183,54 @@ def normalize_identity(spec: PanelSpec) -> PanelSpec:
 
 
 def fix_panel_source(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
-    """移除填錯的面板來源：面板廠填成筆電品牌、面板型號填成行銷名稱。"""
-    from .panel_decode import canonical_maker, decode
+    """面板來源只收真正的面板製造商與料號。
+
+    - 面板廠寫成筆電品牌或行銷名稱（例如「ASUS Lumina Pro OLED」）→ 移到 display_marketing_name
+    - 認不得的面板廠名稱 → 移除（只收已知面板廠，避免把行銷名稱誤當成製造商）
+    - 面板型號看起來是行銷名稱 → 移到 display_marketing_name；EDID 識別碼（例如 BOE0AAE）保留
+    """
+    from .panel_decode import KNOWN_MAKERS, canonical_maker, decode
     flags = []
     data = spec.model_dump()
     brand = (spec.brand or "").strip().lower()
-    maker = (spec.panel_maker or "").strip().lower()
-    if maker and brand and (maker == brand or maker in brand.split() or brand in maker.split()):
-        data["panel_maker"] = None
-        flags.append(f"面板廠填成筆電品牌，已移除：{spec.panel_maker}")
-    pm = spec.panel_model or ""
+    marketing = data.get("display_marketing_name")
+
+    def to_marketing(value: str, why: str):
+        nonlocal marketing
+        flags.append(f"{why}，改列為行銷名稱：{value}")
+        if not marketing:
+            marketing = value
+            if spec.evidence.get("panel_maker") or spec.evidence.get("panel_model"):
+                data["evidence"]["display_marketing_name"] = spec.evidence.get("panel_maker") or spec.evidence.get("panel_model")
+
+    maker_raw = (spec.panel_maker or "").strip()
+    if maker_raw:
+        canon = canonical_maker(maker_raw)
+        words = maker_raw.lower().split()
+        if brand and maker_raw.lower() == brand:
+            # 只寫品牌名（例如 Samsung 筆電寫「Samsung」）無法判斷是不是面板廠，不收
+            data["panel_maker"] = None
+            flags.append(f"面板廠只寫了筆電品牌，無法確認，已移除：{maker_raw}")
+        elif canon in KNOWN_MAKERS:
+            data["panel_maker"] = canon  # 例如 LG 筆電用 LG Display 面板是合理的
+        elif brand and brand in words:
+            data["panel_maker"] = None
+            to_marketing(maker_raw, "面板廠寫成筆電品牌")
+        else:
+            data["panel_maker"] = None
+            flags.append(f"不是已知面板廠，已移除：{maker_raw}")
+    pm = (spec.panel_model or "").strip()
     looks_like_part_no = bool(re.search(r"[A-Za-z]{1,4}\d{2,}", pm.replace(" ", "")))
     if pm and not decode(pm) and (not looks_like_part_no or len(pm.split()) >= 2):
         data["panel_model"] = None
-        flags.append(f"面板型號看起來是行銷名稱，已移除：{pm}")
-    if data.get("panel_maker"):
-        data["panel_maker"] = canonical_maker(data["panel_maker"])
-    if data.get("display_power_tech"):
-        from .ihv import normalize_power_tech
-        data["display_power_tech"] = normalize_power_tech(data["display_power_tech"]) or None
+        to_marketing(pm, "面板型號看起來是行銷名稱")
+    data["display_marketing_name"] = marketing
     for f in ("panel_maker", "panel_model"):
         if data.get(f) is None:
             data["evidence"].pop(f, None)
+    if data.get("display_power_tech"):
+        from .ihv import normalize_power_tech
+        data["display_power_tech"] = normalize_power_tech(data["display_power_tech"]) or None
     return PanelSpec(**data), flags
 
 
