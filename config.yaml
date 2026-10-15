@@ -135,6 +135,8 @@ sources:
       - "Apple MacBook display"
       - "Razer Blade display"
       - "Microsoft Surface Laptop display"
+      - "LG gram display"
+      - "Huawei MateBook Xiaomi Honor laptop display"
       # --- 評測與拆機 ---
       - "laptop review display panel measured"
       - "laptop display panel model teardown"
