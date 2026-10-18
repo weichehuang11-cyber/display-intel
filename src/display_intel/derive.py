@@ -24,6 +24,7 @@ PLAUSIBLE_RANGES = {
     "srgb_pct": (40, 200),
     "dci_p3_pct": (30, 150),
     "adobe_rgb_pct": (30, 150),
+    "ntsc_pct": (30, 150),
     "color_depth_bit": (6, 12),
     "delta_e": (0, 10),
     "refresh_hz": (30, 540),
@@ -129,3 +130,31 @@ def clean_spec(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
         spec = PanelSpec(**data)
         flags += [f"數值不合理已移除：{f}" for f in bad]
     return spec, flags
+
+
+# ---------- 表面處理代碼 ----------
+# 業界常用代碼：AG 霧面／抗眩光、AGLR 抗眩光低反射、AR 抗反射鍍膜、BV 亮面（BrightView／Glossy）
+SURFACE_LABELS = {"AG": "霧面抗眩光", "AGLR": "抗眩光低反射", "AR": "抗反射鍍膜", "BV": "亮面"}
+
+
+def surface_code(surface: Optional[str]) -> Optional[str]:
+    """把文章寫的表面處理統一成 AG / AGLR / AR / BV（可組合，例如 BV+AR）。認不得回傳 None。"""
+    if not surface:
+        return None
+    t = _norm(surface)
+    codes = []
+    low_reflect = bool(re.search(r"\baglr\b|low[\s-]?reflect|低反射", t))
+    anti_glare = bool(re.search(r"\bag\b|anti[\s-]?glare|matte|non[\s-]?glare|霧面|雾面|防眩|抗眩", t))
+    anti_reflect = bool(re.search(r"\bar\b|anti[\s-]?reflect|抗反射|防反射|減反射|减反射", t))
+    glossy = bool(re.search(r"\bbv\b|bright[\s-]?view|gloss|亮面|鏡面|镜面|光面", t))
+    if low_reflect and (anti_glare or "aglr" in t):
+        codes.append("AGLR")
+    elif anti_glare:
+        codes.append("AG")
+    if glossy and not anti_glare:
+        codes.insert(0, "BV")
+    if anti_reflect and "AGLR" not in codes:
+        codes.append("AR")
+    if low_reflect and not codes:
+        codes.append("AR")  # 只寫「低反射」視為抗反射處理
+    return "+".join(codes) or None

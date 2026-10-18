@@ -13,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
-from . import analytics, ihv
+from . import analytics, derive, ihv
 from .db import DB
 from .panel_decode import canonical_maker
 from .schema import Confidence, PanelRecord, PanelSpec
@@ -30,7 +30,7 @@ FIELD_LABELS = {
     "hdr_formats": "HDR 格式", "certifications": "認證", "refresh_hz": "刷新率", "vrr_range": "VRR 範圍",
     "response_ms": "反應時間", "vrr_tech": "VRR 技術", "backlight": "背光", "mini_led_zones": "Mini LED 分區",
     "dimming": "調光", "pwm_hz": "PWM 頻率", "low_power_tech": "節能技術", "eye_care": "護眼",
-    "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
+    "ntsc_pct": "NTSC", "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
     "cpu_platform": "處理器", "gpu": "顯示卡", "gpu_switching": "顯示切換", "platform_certifications": "平台認證",
     "display_power_tech": "平台顯示節能",
 }
@@ -72,12 +72,21 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     else:
         size = ""
     screen = "・".join(x for x in [size, s.panel_tech or "", f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else "",
-                                   f"{s.refresh_hz:g}Hz" if s.refresh_hz else ""] if x)
+                                   f"{s.refresh_hz:g}Hz" if s.refresh_hz else "",
+                                   f"反應時間 {s.response_ms:g}ms" if s.response_ms else ""] if x)
+    code = derive.surface_code(s.surface)
+    surface = (f"{code}（{derive.SURFACE_LABELS.get(code, code)}）" if code in derive.SURFACE_LABELS else code) if code else ""
+    if s.surface and not code:
+        surface = s.surface  # 認不得的寫法照原文顯示
     bright = "・".join(x for x in [f"SDR {s.sdr_nits:g} nits" if s.sdr_nits else "",
                                    f"HDR {s.hdr_peak_nits:g} nits" if s.hdr_peak_nits else "",
-                                   f"DCI-P3 {s.dci_p3_pct:g}%" if s.dci_p3_pct else "",
-                                   f"sRGB {s.srgb_pct:g}%" if s.srgb_pct else "",
-                                   f"ΔE {s.delta_e:g}" if s.delta_e else ""] if x)
+                                   f"對比 {s.contrast}" if s.contrast else ""] if x)
+    gamut = "・".join(x for x in [f"DCI-P3 {s.dci_p3_pct:g}%" if s.dci_p3_pct else "",
+                                  f"sRGB {s.srgb_pct:g}%" if s.srgb_pct else "",
+                                  f"Adobe RGB {s.adobe_rgb_pct:g}%" if s.adobe_rgb_pct else "",
+                                  f"NTSC {s.ntsc_pct:g}%" if s.ntsc_pct else "",
+                                  f"{s.color_depth_bit}-bit" if s.color_depth_bit else "",
+                                  f"ΔE {s.delta_e:g}" if s.delta_e else ""] if x)
     maker = rec.maker
     maker_txt = (f"{maker}（由型號推算）" if rec.panel_maker_inferred else maker) if maker else ""
     panel = " ".join(x for x in [maker_txt, s.panel_model or ""] if x)
@@ -85,8 +94,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         f"品牌命名：{s.display_marketing_name}" if s.display_marketing_name else "",
         _fmt(s.vrr_tech), f"Mini LED {s.mini_led_zones} 區" if s.mini_led_zones else "",
         f"{s.dimming} 調光" if s.dimming else "", f"PWM {s.pwm_hz:g}Hz" if s.pwm_hz else "",
-        _fmt(s.low_power_tech), _fmt(s.display_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats),
-        s.surface or ""] if x)
+        _fmt(s.low_power_tech), _fmt(s.display_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats)] if x)
     if s.touch is True:
         touch = "支援觸控" + (f"・觸控筆 {s.stylus}" if s.stylus else "")
     elif s.touch is False:
@@ -102,7 +110,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
     return {
         "score": f"{known}/{total}", "score_pct": round(known / total * 100), "missing": "、".join(analytics.missing_fields(rec)),
         "key": rec.key, "rec": rec, "brand": s.brand or "", "model": s.model or "",
-        "screen": screen, "bright": bright, "touch": touch,
+        "screen": screen, "bright": bright, "gamut": gamut, "surface": surface, "touch": touch,
         "platform": ihv.platform_text(s), "ihv": ihv.evaluate(s), "panel": panel or "面板來源待確認", "panel_known": bool(panel),
         "extras": extras, "derived": derived, "tags": tags or [],
         "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
@@ -381,9 +389,9 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
 
     ws2 = wb.create_sheet("全部面板紀錄")
     sheet(ws2, ["可信度"] + [FIELD_LABELS[f] for f in fields]
-          + ["面板廠（含推算）", "PPI", "長寬比", "像素密度", "首次出現", "最後更新", "來源", "網址", "查核標記"],
+          + ["表面代碼", "面板廠（含推算）", "PPI", "長寬比", "像素密度", "首次出現", "最後更新", "來源", "網址", "查核標記"],
           [[rec.confidence.label] + [_fmt(getattr(rec.spec, f)) for f in fields]
-           + [(f"{rec.maker}（推算）" if rec.panel_maker_inferred else rec.maker) or "",
+           + [derive.surface_code(rec.spec.surface) or "", (f"{rec.maker}（推算）" if rec.panel_maker_inferred else rec.maker) or "",
               rec.ppi, rec.aspect_ratio, rec.density_class, rec.first_seen.strftime("%Y-%m-%d"),
               rec.last_updated.strftime("%Y-%m-%d"), rec.source_name, rec.source_url, "；".join(rec.flags)]
            for rec in db.all_panels()])

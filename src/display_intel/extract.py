@@ -40,7 +40,9 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
 10. panel_maker 只填面板製造商（如 BOE、Samsung Display、LG Display、AUO、Innolux、CSOT、Sharp），不可填筆電品牌。
 11. panel_model 只填面板料號（如 NE160QDM-NY1、ATNA60CL10、BOE0AAE）。
     品牌的螢幕行銷名稱（如 ASUS Lumina OLED、Lenovo PureSight、Dell InfinityEdge）填在 display_marketing_name，
-    不可填進 panel_maker 或 panel_model；行銷名稱不代表面板製造商。"""
+    不可填進 panel_maker 或 panel_model；行銷名稱不代表面板製造商。
+14. surface：照原文寫表面處理（例如 anti-glare、AGLR、anti-reflection coating、glossy、BrightView、霧面），不要改寫或翻譯。
+15. 色域：文章寫哪個標準就填哪個（DCI-P3、sRGB、Adobe RGB、NTSC 各自獨立），不要換算；response_ms 填文章寫的反應時間數字。"""
 
 FIELD_GUIDE = """輸出格式：
 {"results": [ { "article_id": 1, "relevant": true/false, "is_rumor": true/false,
@@ -48,7 +50,7 @@ FIELD_GUIDE = """輸出格式：
     "brand","model","product_type"(laptop|notebook|aio),
     "panel_maker","panel_model","panel_tech"(IPS LCD|VA LCD|Mini LED LCD|OLED|Tandem OLED|其他),"display_marketing_name",
     "size_inch","res_w","res_h","surface",
-    "sdr_nits","hdr_peak_nits","contrast","srgb_pct","dci_p3_pct","adobe_rgb_pct","color_depth_bit","delta_e",
+    "sdr_nits","hdr_peak_nits","contrast","srgb_pct","dci_p3_pct","adobe_rgb_pct","ntsc_pct","color_depth_bit","delta_e",
     "hdr_formats":[],"certifications":[],
     "refresh_hz","vrr_range","response_ms","vrr_tech":[],
     "backlight","mini_led_zones","dimming","pwm_hz",

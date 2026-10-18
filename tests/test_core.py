@@ -582,7 +582,7 @@ def test_platform_matrix_and_card(db, tmp_path):
                                                      refresh_hz=240, vrr_tech=["G-SYNC"])])
     verify.ingest(db, [(a, ex, [])])
     ctx, html, xlsx, _ = build_report(db, {"schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}})
-    assert "🔌 AMD Ryzen AI 9・NVIDIA RTX 5070" in html and "可變刷新率" in html
+    assert "平台：AMD Ryzen AI 9・NVIDIA RTX 5070" in html
     import openpyxl
     assert "平台適配" in openpyxl.load_workbook(xlsx).sheetnames
 
@@ -698,3 +698,19 @@ def test_panel_source_strict():
     assert s.panel_maker is None
     s, _ = fix_panel_source(PanelSpec(brand="HP", model="OMEN 16", panel_maker="BOE", panel_model="BOE0AAE"))
     assert s.panel_model == "BOE0AAE" and decode("BOE0AAE")["maker"] == "BOE" and decode("SDC4189")["maker"] == "Samsung Display"
+
+
+
+def test_surface_code_and_card_lines():
+    from display_intel.derive import surface_code
+    assert surface_code("anti-glare") == "AG" and surface_code("霧面") == "AG"
+    assert surface_code("Anti-Glare Low Reflection") == "AGLR" and surface_code("AGLR") == "AGLR"
+    assert surface_code("glossy") == "BV" and surface_code("HP BrightView") == "BV"
+    assert surface_code("glossy with anti-reflection coating") == "BV+AR" and surface_code("AR") == "AR"
+    assert surface_code("low reflection") == "AR" and surface_code("something else") is None
+    from display_intel.report import panel_card
+    c = panel_card(_rec("s1", 1, brand="HP", model="X", surface="anti-glare low reflection", response_ms=3,
+                        dci_p3_pct=100, adobe_rgb_pct=95, ntsc_pct=72, srgb_pct=133))
+    assert c["surface"] == "AGLR（抗眩光低反射）" and "反應時間 3ms" in c["screen"]
+    assert c["gamut"].startswith("DCI-P3 100%・sRGB 133%・Adobe RGB 95%・NTSC 72%")
+    assert panel_card(_rec("s2", 1, brand="HP", model="Y", surface="Nano texture"))["surface"] == "Nano texture"

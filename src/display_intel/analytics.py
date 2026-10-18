@@ -34,7 +34,7 @@ KEY_FIELDS = [
     ("面板技術", lambda r: bool(r.spec.panel_tech)),
     ("刷新率", lambda r: bool(r.spec.refresh_hz)),
     ("亮度", lambda r: bool(r.spec.sdr_nits or r.spec.hdr_peak_nits)),
-    ("色域", lambda r: bool(r.spec.srgb_pct or r.spec.dci_p3_pct or r.spec.adobe_rgb_pct)),
+    ("色域", lambda r: bool(r.spec.srgb_pct or r.spec.dci_p3_pct or r.spec.adobe_rgb_pct or r.spec.ntsc_pct)),
     ("面板廠", lambda r: bool(r.maker)),
     ("面板型號", lambda r: bool(r.spec.panel_model)),
     ("反應時間", lambda r: bool(r.spec.response_ms)),

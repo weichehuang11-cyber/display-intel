@@ -76,7 +76,7 @@ class PanelSpec(BaseModel):
     size_inch: Optional[float] = None
     res_w: Optional[int] = Field(None, description="水平像素")
     res_h: Optional[int] = Field(None, description="垂直像素")
-    surface: Optional[str] = Field(None, description="霧面 / 亮面 / 抗反射")
+    surface: Optional[str] = Field(None, description="表面處理原文，例如 anti-glare、glossy、AGLR、anti-reflection")
     # 亮度與色彩
     sdr_nits: Optional[float] = None
     hdr_peak_nits: Optional[float] = None
@@ -84,6 +84,7 @@ class PanelSpec(BaseModel):
     srgb_pct: Optional[float] = None
     dci_p3_pct: Optional[float] = None
     adobe_rgb_pct: Optional[float] = None
+    ntsc_pct: Optional[float] = None
     color_depth_bit: Optional[int] = None
     delta_e: Optional[float] = None
     hdr_formats: Optional[list[str]] = Field(None, description="HDR10、Dolby Vision 等")
