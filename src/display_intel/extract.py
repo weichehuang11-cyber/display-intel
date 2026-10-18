@@ -47,7 +47,10 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
 17. 光學／結構／機構／介面（文章有寫才填，要附原文）：reflectance_pct 反射率%、haze_pct 霧度%、uniformity_pct 亮度均勻度%、
     viewing_angle 可視角、backplane 背板（a-Si／Oxide／LTPS／LTPO）、color_depth_desc 色深原文（10-bit、8-bit+FRC）、
     touch_structure 觸控結構（On-cell、In-cell、OGS）、bezel 邊框寬度原文、panel_thickness_mm 面板厚度、
-    camera_cutout 鏡頭位置（上邊框／凹口／開孔）、edp_version eDP 版本、vrr_min_hz 可變刷新最低值、panel_power_w 面板功耗 W。"""
+    camera_cutout 鏡頭位置（上邊框／凹口／開孔）、edp_version eDP 版本、vrr_min_hz 可變刷新最低值、panel_power_w 面板功耗 W。
+18. price／price_currency：文章寫出的上市價格或起價（starting at、起售价、起價、から）才填，只填數字（例如 1299），
+    幣別填 ISO 代碼（USD、TWD、CNY、EUR、JPY、GBP、KRW、INR）；有多個價格時填這個螢幕選配的價格，分不出來就填最低起價。
+    evidence 的 price 要包含金額與幣別符號原文（例如 "starting at $1,299"）。折扣價、二手價、傳聞價不要填。"""
 
 FIELD_GUIDE = """輸出格式：
 {"results": [ { "article_id": 1, "relevant": true/false, "is_rumor": true/false,
@@ -60,7 +63,7 @@ FIELD_GUIDE = """輸出格式：
     "refresh_hz","vrr_range","response_ms","vrr_tech":[],
     "backlight","mini_led_zones","dimming","pwm_hz",
     "low_power_tech":[],"eye_care":[],"touch"(true/false),"stylus","glass","screen_to_body_pct","form_factor",
-    "cpu_platform","gpu","gpu_switching","platform_certifications":[],"display_power_tech":[],"launch_period",
+    "cpu_platform","gpu","gpu_switching","platform_certifications":[],"display_power_tech":[],"launch_period","price","price_currency",
     "reflectance_pct","haze_pct","uniformity_pct","viewing_angle","backplane","color_depth_desc","touch_structure",
     "bezel","panel_thickness_mm","camera_cutout","edp_version","vrr_min_hz","panel_power_w",
     "evidence": {"欄位名": "原文片段"} } ],

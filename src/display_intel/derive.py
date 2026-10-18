@@ -43,6 +43,41 @@ PLAUSIBLE_RANGES = {
 # 不需要原文依據的欄位（用於識別或由其他欄位推得）
 NO_EVIDENCE_NEEDED = {"evidence", "product_type", "regions"}
 
+# ---------- 價格 ----------
+# 概略匯率（換算美元用來分價格帶；config.yaml 的 price.fx_to_usd 可覆蓋）
+DEFAULT_FX_TO_USD = {"USD": 1.0, "TWD": 0.031, "CNY": 0.14, "EUR": 1.08, "JPY": 0.0067, "GBP": 1.27, "KRW": 0.00073,
+                     "INR": 0.012, "AUD": 0.66, "CAD": 0.73, "HKD": 0.128, "SGD": 0.74}
+_CURRENCY_HINTS = [  # (正規表示式, 幣別)；順序重要：NT$、US$、HK$ 要在 $ 之前
+    (r"nt\$|ntd|twd|新台幣|新臺幣|台幣|臺幣", "TWD"), (r"hk\$|hkd|港幣|港元", "HKD"), (r"(?<![a-z])s\$|sgd", "SGD"),
+    (r"(?<![a-z])a\$|aud", "AUD"), (r"(?<![a-z])c\$|cad", "CAD"), (r"us\$|usd|美元|美金", "USD"),
+    (r"rmb|cny|人民币|人民幣|元", "CNY"), (r"jpy|円|税込", "JPY"), (r"eur|€|欧元|歐元", "EUR"),
+    (r"gbp|£|英镑|英鎊", "GBP"), (r"krw|₩|원", "KRW"), (r"inr|₹|rs\.", "INR"), (r"\$", "USD"),
+]
+
+
+def normalize_currency(*texts: Optional[str]) -> Optional[str]:
+    """從 AI 填的幣別或價格原文判斷幣別代碼。認不得回傳 None。"""
+    for t in texts:
+        if not t:
+            continue
+        code = str(t).strip().upper()
+        if code in DEFAULT_FX_TO_USD:
+            return code
+        low = str(t).lower()
+        yen = re.search(r"[¥￥]\s*([\d,]+)", low)
+        if yen and not re.search(r"円|jpy|rmb|cny|元", low):
+            amount = int(yen.group(1).replace(",", "") or 0)
+            return "JPY" if amount >= 50000 else "CNY"  # 日圓筆電價格多為六位數，人民幣多為四到五位數
+        for pat, cur in _CURRENCY_HINTS:
+            if re.search(pat, low):
+                return cur
+    return None
+
+
+def price_usd(price: Optional[float], currency: Optional[str], fx: Optional[dict] = None) -> Optional[float]:
+    rate = (fx or DEFAULT_FX_TO_USD).get(currency or "")
+    return round(price * rate) if price and rate else None
+
 
 def ppi(res_w: Optional[int], res_h: Optional[int], size_inch: Optional[float]) -> Optional[float]:
     if not (res_w and res_h and size_inch):
@@ -115,6 +150,8 @@ def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
             # 品牌、機型名稱只要出現在文章中即可
             if quote_in_text(str(value), text) or field in evidence:
                 continue
+        elif field == "price_currency" and "price" in evidence:
+            continue  # 幣別以價格原文為依據
         elif field in evidence:
             continue
         data[field] = None
@@ -123,10 +160,27 @@ def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
     return PanelSpec(**data), dropped
 
 
+def clean_price(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
+    """統一幣別；認不得幣別或換算後不合理（低於 US$150 或高於 US$10,000）就移除價格。"""
+    if not spec.price:
+        return spec, []
+    cur = normalize_currency(spec.price_currency, spec.evidence.get("price"))
+    usd = price_usd(spec.price, cur)
+    data = spec.model_dump()
+    if usd is None or not 150 <= usd <= 10000:
+        data["price"] = data["price_currency"] = None
+        data["evidence"].pop("price", None)
+        return PanelSpec(**data), [f"價格無法判斷幣別或不合理已移除：{spec.price} {spec.price_currency or ''}".strip()]
+    data["price_currency"] = cur
+    return PanelSpec(**data), []
+
+
 def clean_spec(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
-    """依序執行：原文依據檢查 → 合理性檢查。回傳清理後的規格與問題標記。"""
+    """依序執行：原文依據檢查 → 價格幣別 → 合理性檢查。回傳清理後的規格與問題標記。"""
     spec, dropped = enforce_evidence(spec, text)
     flags = [f"無原文依據已移除：{f}" for f in dropped]
+    spec, pf = clean_price(spec)
+    flags += pf
     bad = plausibility_issues(spec)
     if bad:
         data = spec.model_dump()

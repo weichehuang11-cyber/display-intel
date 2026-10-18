@@ -387,6 +387,88 @@ def _surface_bucket(r):
     return "AGLR" if "AGLR" in c else "AG" if "AG" in c else "BV／AR" if ("BV" in c or "AR" in c) else c
 
 
+# ---------- 價格帶 ----------
+from .derive import DEFAULT_FX_TO_USD, price_usd  # noqa: E402
+
+PRICE_CFG = {"fx": dict(DEFAULT_FX_TO_USD), "bands": [800, 1200, 1800, 2500]}
+
+
+def configure_price(cfg: dict):
+    """套用 config.yaml 的 price 設定（匯率與價格帶分界，美元）。"""
+    pc = cfg.get("price") or {}
+    PRICE_CFG["fx"] = {**DEFAULT_FX_TO_USD, **{k.upper(): float(v) for k, v in (pc.get("fx_to_usd") or {}).items()}}
+    if pc.get("bands_usd"):
+        PRICE_CFG["bands"] = sorted(int(b) for b in pc["bands_usd"])
+
+
+def band_labels() -> list[str]:
+    b = PRICE_CFG["bands"]
+    out = [f"US${b[0]:,} 以下"]
+    out += [f"US${lo:,}–{hi - 1:,}" for lo, hi in zip(b, b[1:])]
+    return out + [f"US${b[-1]:,} 以上"]
+
+
+def rec_price_usd(r) -> float | None:
+    return price_usd(r.spec.price, r.spec.price_currency, PRICE_CFG["fx"])
+
+
+def _price_bucket(r):
+    usd = rec_price_usd(r)
+    if usd is None:
+        return None
+    labels, bands = band_labels(), PRICE_CFG["bands"]
+    for i, edge in enumerate(bands):
+        if usd < edge:
+            return labels[i]
+    return labels[-1]
+
+
+def price_spec_matrix(records: list, min_priced: int = 3) -> dict | None:
+    """價位帶 × 規格：各價位帶的機型數與 OLED、≥120Hz、≥2.5K、觸控比例，以及亮度中位數。
+
+    以機型為單位：價格取各選配最低起價，規格取資料最完整的選配。有標價的機型不到 min_priced 款時不顯示。
+    """
+    from statistics import median
+    from .verify import _norm, model_norm
+    models: dict = {}
+    for r in records:
+        if r.confidence.rank < Confidence.C.rank:
+            continue
+        k = (_norm(r.spec.brand), model_norm(r.spec))
+        m = models.setdefault(k, {"best": r, "price": None})
+        if completeness(r)[0] > completeness(m["best"])[0]:
+            m["best"] = r
+        usd = rec_price_usd(r)
+        if usd and (m["price"] is None or usd < m["price"]):
+            m["price"] = usd
+    priced = [m for m in models.values() if m["price"]]
+    if len(priced) < min_priced:
+        return None
+    labels, bands = band_labels(), PRICE_CFG["bands"]
+    rows = []
+    for i, label in enumerate(labels):
+        lo = bands[i - 1] if i else 0
+        hi = bands[i] if i < len(bands) else 10 ** 9
+        ms = [m for m in priced if lo <= m["price"] < hi]
+        if not ms:
+            continue
+
+        def share(pred, known):
+            k = [m for m in ms if known(m["best"].spec)]
+            return (round(100 * sum(1 for m in k if pred(m["best"])) / len(k)), len(k)) if k else (None, 0)
+        sdr = [m["best"].spec.sdr_nits for m in ms if m["best"].spec.sdr_nits]
+        rows.append({
+            "band": label, "n": len(ms),
+            "oled": share(lambda r: _tech_bucket(r) == "OLED", lambda s: bool(s.panel_tech)),
+            "hz120": share(lambda r: (r.spec.refresh_hz or 0) >= 120, lambda s: bool(s.refresh_hz)),
+            "res25": share(lambda r: (r.spec.res_w or 0) >= 2560, lambda s: bool(s.res_w)),
+            "touch": share(lambda r: r.spec.touch is True, lambda s: s.touch is not None),
+            "sdr": round(median(sdr)) if sdr else None,
+            "examples": "、".join(f"{m['best'].spec.brand} {m['best'].spec.model}" for m in sorted(ms, key=lambda m: m["price"])[:3]),
+        })
+    return {"rows": rows, "priced": len(priced), "models": len(models)}
+
+
 TREND_DIMENSIONS = [
     ("尺寸分布", _size_bucket, ["13 吋以下", "14 吋級", "15.6 吋級", "16 吋級", "17–18 吋", "AIO"]),
     ("面板技術", _tech_bucket, ["OLED", "Mini LED", "LCD"]),
@@ -395,6 +477,7 @@ TREND_DIMENSIONS = [
     ("長寬比", _aspect_bucket, ["16:10", "16:9", "3:2", "其他"]),
     ("表面處理", _surface_bucket, ["AG", "AGLR", "BV／AR"]),
     ("面板廠", lambda r: r.maker, None),
+    ("價格帶", _price_bucket, None),  # 分類名稱依 config 的價格帶分界，於 quarterly_trends 內排序
 ]
 
 
@@ -422,6 +505,8 @@ def quarterly_trends(records: list[PanelRecord], max_quarters: int = 4, min_mode
             vals = Counter(v for v in (fn(r) for r in by_q[q]) if v)
             all_vals.update(vals)
             rows.append({"quarter": q, "n": sum(vals.values()), "counts": vals})
+        if name == "價格帶":
+            order = band_labels()
         buckets = order or [b for b, _ in all_vals.most_common(6)]
         buckets = [b for b in buckets if all_vals.get(b)]
         if not buckets:

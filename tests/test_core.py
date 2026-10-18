@@ -1043,3 +1043,30 @@ def test_trend_bars_and_excel_chart(tmp_path):
     ws = write_trend_charts(wb.active, qt)
     assert len(ws._charts) == 1 and ws["B3"].value == "OLED" and ws["B4"].value == 40.0
     wb.save(tmp_path / "t.xlsx")
+
+
+def test_price_fields_and_bands():
+    from display_intel import analytics
+    from display_intel.report import price_text
+    text = "The HP ZBook is available now starting at $1,299. 台灣售價 NT$45,900 起。"
+    s, flags = derive.clean_spec(PanelSpec(brand="HP", model="ZBook", price=1299, price_currency="usd",
+                                           evidence={"price": "starting at $1,299"}), text)
+    assert (s.price, s.price_currency) == (1299, "USD") and not flags
+    s2, _ = derive.clean_spec(PanelSpec(brand="HP", model="ZBook", price=45900, evidence={"price": "NT$45,900 起"}), text)
+    assert s2.price_currency == "TWD" and "約 US$1,423" in price_text(s2)
+    s3, flags = derive.clean_spec(PanelSpec(brand="HP", model="ZBook", price=45900, price_currency="USD",
+                                            evidence={"price": "NT$45,900 起"}), text)
+    assert s3.price is None and s3.price_currency is None and flags  # US$45,900 不合理 → 價格與幣別一起移除
+    s4, _ = derive.clean_spec(PanelSpec(brand="HP", model="ZBook", price=999, evidence={"price": "價格 999"}), "價格 999")
+    assert s4.price is None  # 認不得幣別 → 移除
+    analytics.configure_price({"price": {"bands_usd": [1000, 2000]}})
+    recs = [_rec("p1", 1, brand="A", model="One", price=799, price_currency="USD", panel_tech="OLED", refresh_hz=120),
+            _rec("p2", 1, brand="A", model="One", price=999, price_currency="USD", panel_tech="IPS LCD"),
+            _rec("p3", 1, brand="B", model="Two", price=1500, price_currency="USD", panel_tech="IPS LCD", refresh_hz=60, touch=True),
+            _rec("p4", 1, brand="C", model="Three", price=2500, price_currency="EUR", panel_tech="OLED", sdr_nits=500)]
+    m = analytics.price_spec_matrix(recs)
+    assert [r["band"] for r in m["rows"]] == ["US$1,000 以下", "US$1,000–1,999", "US$2,000 以上"]
+    assert m["rows"][0]["n"] == 1 and m["rows"][0]["oled"] == (100, 1)  # 同機型取最低價、規格取最完整的選配
+    assert m["rows"][1]["touch"] == (100, 1) and m["rows"][2]["sdr"] == 500
+    assert analytics._price_bucket(recs[3]) == "US$2,000 以上"
+    analytics.configure_price({})

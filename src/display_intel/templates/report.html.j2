@@ -28,6 +28,7 @@
     {% endif %}
     <div style="font-size:14px;line-height:1.6;{% if not o.panel_known %}color:#999;{% endif %}">🏭 {{ o.panel }}</div>
     {% if o.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ o.extras }}</div>{% endif %}
+    {% if o.price %}<div style="font-size:13px;line-height:1.6;color:#555;">💲 {{ o.price }}</div>{% endif %}
     {% if o.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ o.derived }}</div>{% endif %}
     {% if o.provenance|length > 1 %}<div style="font-size:11.5px;line-height:1.6;color:#888;margin-top:2px;">出處｜{% for p in o.provenance %}{% if p.url %}<a href="{{ p.url }}" style="color:#1f5fa8;text-decoration:none;">{{ p.label }}</a>{% else %}{{ p.label }}{% endif %}：{{ p.fields }}{% if not loop.last %}；{% endif %}{% endfor %}</div>{% endif %}
     {% if o.platform %}<div style="font-size:12px;line-height:1.6;color:#999;">平台：{{ o.platform }}</div>{% endif %}
@@ -50,6 +51,7 @@
 <tr style="border-top:1px solid #e3e6ea;vertical-align:top;font-size:12px;{% if stripe %}background:#f8fafc;{% endif %}">
   <td style="padding:6px;min-width:96px;">{% if r.label %}<b>{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1a1a1a;text-decoration:none;">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</b>{% endif %}
     {% if r.option %}<div style="font-size:10.5px;color:#999;">{{ r.option }}</div>{% endif %}
+    {% if r.price %}<div style="font-size:10.5px;color:#52514e;">{{ r.price }}</div>{% endif %}
     {% if r.updated %}<div style="font-size:10.5px;color:#1e7d4f;">● {{ period_label }}有更新</div>{% endif %}
     {% for tg in r.tags or [] %}<div style="font-size:10.5px;color:#a16207;">★ {{ tg }}</div>{% endfor %}</td>
   <td style="padding:6px;white-space:nowrap;">{{ r.size }}{{ mk(r, "size") }}<div style="font-size:10.5px;color:#666;">{{ r.tech }}{{ mk(r, "tech") }}</div></td>
@@ -207,6 +209,23 @@
     {% endfor %}
   </table>
   <div style="font-size:11px;color:#999;margin-top:4px;">系統會自動回頭補查這些機型的官方規格頁與評測；面板廠與型號通常要等評測或拆機才會公開。</div>
+  {% endif %}
+
+  {% if price_matrix %}
+  <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">價位帶 × 規格（{{ price_matrix.priced }} 款有標價）</div>
+  <div style="overflow-x:auto;">
+  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#eef0f6;text-align:left;"><th>價位帶（起價）</th><th style="text-align:right;">款數</th><th style="text-align:right;">OLED</th>
+      <th style="text-align:right;">≥120Hz</th><th style="text-align:right;">≥2.5K</th><th style="text-align:right;">觸控</th><th style="text-align:right;">SDR 中位數</th></tr>
+    {% for r in price_matrix.rows %}
+    <tr style="border-top:1px solid #e3e6ea;vertical-align:top;"><td style="white-space:nowrap;">{{ r.band }}<div style="font-size:10.5px;color:#999;white-space:normal;">{{ r.examples }}</div></td>
+      <td style="text-align:right;">{{ r.n }}</td>
+      {% for v in [r.oled, r.hz120, r.res25, r.touch] %}<td style="text-align:right;">{% if v[0] is not none %}{{ v[0] }}%<div style="font-size:10px;color:#aaa;">n={{ v[1] }}</div>{% else %}<span style="color:#bbb;">—</span>{% endif %}</td>{% endfor %}
+      <td style="text-align:right;">{{ r.sdr ~ " nits" if r.sdr else "—" }}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  <div style="font-size:11px;color:#999;margin-top:4px;">以機型為單位、取最低起價，非美元以概略匯率換算（config.yaml 的 price 可調整）；比例只計算有標示該規格的機型（n）。</div>
   {% endif %}
 
   {% if quarterly and quarterly.dims %}

@@ -37,8 +37,22 @@ FIELD_LABELS = {
     "bezel": "邊框", "panel_thickness_mm": "面板厚度 mm", "camera_cutout": "鏡頭位置", "edp_version": "eDP 版本",
     "vrr_min_hz": "VRR 最低 Hz", "panel_power_w": "面板功耗 W", "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
     "cpu_platform": "處理器", "gpu": "顯示卡", "gpu_switching": "顯示切換", "platform_certifications": "平台認證",
-    "display_power_tech": "平台顯示節能",
+    "display_power_tech": "平台顯示節能", "launch_period": "上市時間", "price": "起價", "price_currency": "幣別",
 }
+
+
+def price_text(s) -> str:
+    """起價顯示：原幣別，非美元另附約當美元。"""
+    if not s.price:
+        return ""
+    sym = {"USD": "US$", "TWD": "NT$", "CNY": "¥", "EUR": "€", "JPY": "¥", "GBP": "£", "HKD": "HK$"}.get(s.price_currency or "", "")
+    txt = f"{sym or (s.price_currency or '') + ' '}{s.price:,.0f}"
+    if s.price_currency == "JPY":
+        txt += "（日圓）"
+    usd = analytics.price_usd(s.price, s.price_currency, analytics.PRICE_CFG["fx"])
+    if usd and s.price_currency != "USD":
+        txt += f"（約 US${usd:,.0f}）"
+    return txt + " 起"
 # ---------- 欄位出處 ----------
 PROV_SKIP = {"brand", "model", "product_type", "regions", "evidence", "res_h"}
 # 比較表欄位 → 規格欄位（用來標示出處記號）
@@ -193,7 +207,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         "screen": screen, "bright": bright, "gamut": gamut, "surface": surface, "touch": touch,
         "optics": optics, "structure": structure, "mechanics": mechanics, "interface": interface,
         "platform": ihv.platform_text(s), "ihv": ihv.evaluate(s), "panel": panel or "面板來源待確認", "panel_known": bool(panel),
-        "extras": extras, "derived": derived, "tags": tags or [], "provenance": provenance(rec),
+        "extras": extras, "derived": derived, "tags": tags or [], "provenance": provenance(rec), "price": price_text(s),
         "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
         "source_name": rec.source_name, "source_url": rec.source_url, "changes": change_text,
         "spec": s.model_dump(), "record": rec.model_dump(mode="json"),
@@ -261,6 +275,7 @@ def ctx_label(weekly: bool) -> str:
 
 def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dict:
     weekly = (cfg.get("schedule") or {}).get("cadence", "daily") == "weekly"
+    analytics.configure_price(cfg)
     period_start = (today - timedelta(days=7 if weekly else 1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 同一款機型在本期可能有多個事件（新增後又補規格），合併成一張卡片
@@ -332,6 +347,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "to_fill": analytics.to_fill(all_records, today),
         "platform_matrix": ihv.platform_matrix(all_records, today),
         "quarterly": trend_bars(analytics.quarterly_trends(all_records)),
+        "price_matrix": analytics.price_spec_matrix(all_records),
         "backfill": backfill_status(db, cfg, backfilled),
         "watch": watch_rows(db, cfg, all_records, set(grouped)),
         "watch_cmp": watch_comparison(db, cfg, all_records, set(grouped)) if cfg.get("watchlist") else None,
@@ -639,7 +655,7 @@ def compare_row(rec: PanelRecord, label: str = "", option: str = "", extra: dict
         "surface": code or ((s.surface[:14] + ("…" if len(s.surface) > 14 else "")) if s.surface else "—"),
         "maker": (f"{maker}*" if rec.panel_maker_inferred else maker) if maker else "—",
         "panel_model": s.panel_model or "",
-        "touch": "觸控" if s.touch else "",
+        "touch": "觸控" if s.touch else "", "price": price_text(s),
         "score": f"{k}/{t}", "score_pct": round(k / t * 100),
         "best": set(), "source_url": rec.source_url,
         "marks": {k: (m, rec.source_of(f).label) for k, f in CMP_FIELDS.items()
@@ -773,6 +789,8 @@ COMPARE_COLUMNS = [
     ("基本", "解析度", lambda r: r["res"] if r["res"] != "—" else "", None, 12),
     ("基本", "長寬比", lambda r: r["aspect"], None, 8),
     ("基本", "PPI", lambda r: r["rec"].ppi, max, 7),
+    ("基本", "起價", lambda r: r["price"], None, 16),
+    ("基本", "價格帶", lambda r: analytics._price_bucket(r["rec"]), None, 14),
     ("動態", "刷新率 Hz", lambda r: r["rec"].spec.refresh_hz, max, 9),
     ("動態", "反應 ms", lambda r: r["rec"].spec.response_ms, min, 8),
     ("動態", "VRR", lambda r: _j(r["rec"].spec.vrr_range) or _j(r["rec"].spec.vrr_tech), None, 12),

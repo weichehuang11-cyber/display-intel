@@ -126,6 +126,8 @@ class PanelSpec(BaseModel):
     vrr_min_hz: Optional[float] = Field(None, description="可變刷新率最低值 Hz")
     panel_power_w: Optional[float] = Field(None, description="面板功耗 W")
     launch_period: Optional[str] = Field(None, description="發表或上市時間，例如 2026-01 或 2026 Q1（文章明確寫才填）")
+    price: Optional[float] = Field(None, description="上市起價（文章寫的數字，原幣別）")
+    price_currency: Optional[str] = Field(None, description="幣別 ISO 代碼：USD、TWD、CNY、EUR、JPY、GBP、KRW、INR")
     # 平台（與 Intel / NVIDIA / AMD / Qualcomm 的搭配）
     cpu_platform: Optional[str] = Field(None, description="處理器，例如 Intel Core Ultra 7 258V、AMD Ryzen AI 9 HX 370")
     gpu: Optional[str] = Field(None, description="獨立顯示卡，例如 NVIDIA GeForce RTX 5070 Laptop；只有內顯就寫內顯型號或省略")
