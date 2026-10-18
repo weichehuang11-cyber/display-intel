@@ -108,6 +108,7 @@ class PanelSpec(BaseModel):
     glass: Optional[str] = None
     screen_to_body_pct: Optional[float] = None
     form_factor: Optional[str] = Field(None, description="一般 / 可折疊 / 雙螢幕 / 翻轉")
+    launch_period: Optional[str] = Field(None, description="發表或上市時間，例如 2026-01 或 2026 Q1（文章明確寫才填）")
     # 平台（與 Intel / NVIDIA / AMD / Qualcomm 的搭配）
     cpu_platform: Optional[str] = Field(None, description="處理器，例如 Intel Core Ultra 7 258V、AMD Ryzen AI 9 HX 370")
     gpu: Optional[str] = Field(None, description="獨立顯示卡，例如 NVIDIA GeForce RTX 5070 Laptop；只有內顯就寫內顯型號或省略")
@@ -163,6 +164,7 @@ class PanelRecord(BaseModel):
     source_url: str
     source_name: str
     first_seen: datetime
+    announced: Optional[datetime] = None  # 新聞發布日（用來判斷是哪一季的新機；關注清單建檔的既有機型為空）
     last_updated: datetime
     # 衍生規格
     ppi: Optional[float] = None

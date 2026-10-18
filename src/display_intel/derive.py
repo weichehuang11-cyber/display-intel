@@ -158,3 +158,5 @@ def surface_code(surface: Optional[str]) -> Optional[str]:
     if low_reflect and not codes:
         codes.append("AR")  # 只寫「低反射」視為抗反射處理
     return "+".join(codes) or None
+
+

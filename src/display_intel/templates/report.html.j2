@@ -172,6 +172,28 @@
   <div style="font-size:11px;color:#999;margin-top:4px;">系統會自動回頭補查這些機型的官方規格頁與評測；面板廠與型號通常要等評測或拆機才會公開。</div>
   {% endif %}
 
+  {% if quarterly and quarterly.dims %}
+  <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">季度趨勢（新機規格分布）</div>
+  <div style="font-size:11px;color:#999;margin-bottom:6px;">
+    各季機型數：{% for q in quarterly.quarters %}{{ q }} {{ quarterly.models[q] }} 款{% if not loop.last %}、{% endif %}{% endfor %}。
+    {% if not quarterly.comparable %}目前可比較的季度不足（每季需 5 款以上），季對季變化待資料累積後顯示。{% endif %}
+  </div>
+  {% for d in quarterly.dims %}
+  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e3e6ea;margin-bottom:8px;">
+    <tr style="background:#eef0f6;text-align:left;"><th>{{ d.name }}</th>{% for b in d.buckets %}<th style="text-align:right;">{{ b }}</th>{% endfor %}</tr>
+    {% for row in d.rows %}
+    <tr style="border-top:1px solid #e3e6ea;"><td style="white-space:nowrap;">{{ row.quarter }} <span style="color:#999;">n={{ row.n }}</span></td>
+      {% for b in d.buckets %}<td style="text-align:right;">{% if row.share[b] is not none %}{{ "%.0f"|format(row.share[b] * 100) }}%{% else %}—{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    {% if d.shift %}
+    <tr style="border-top:1px solid #e3e6ea;background:#fafbfc;"><td>季變化</td>
+      {% for b in d.buckets %}{% set v = d.shift[b] %}<td style="text-align:right;color:{% if v > 0 %}#1e7d4f{% elif v < 0 %}#b42318{% else %}#999{% endif %};">{% if v > 0 %}▲{{ v }}{% elif v < 0 %}▼{{ -v }}{% else %}＝{% endif %}</td>{% endfor %}</tr>
+    {% endif %}
+  </table>
+  {% endfor %}
+  <div style="font-size:11px;color:#999;margin-top:2px;">占比只計算有標示該規格的機型；季變化單位為百分點。季度依發表／上市時間判斷，沒寫則用新聞日期；關注清單的既有機型若無時間不計入。</div>
+  {% endif %}
+
   {% if trend %}
   <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">近 30 天分布（{{ trend.count }} 款）</div>
   <p style="font-size:13px;line-height:1.75;margin:0;">

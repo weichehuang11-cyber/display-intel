@@ -313,3 +313,125 @@ def glossary_for(text: str) -> list[tuple[str, str]]:
     "PSR／Panel Replay": "面板自刷新：畫面不變時由面板自行維持影像，讓顯示輸出暫停以省電。",
     "MUX／Advanced Optimus": "獨顯直連", "Intel Evo": "evo", "Copilot+ PC": "copilot+"}
     return [(k, GLOSSARY[k]) for k, needle in keys.items() if needle in t]
+
+
+# ---------- 季度趨勢 ----------
+import re as _re
+
+
+def quarter_of(rec: PanelRecord) -> Optional[str]:
+    """機型屬於哪一季：優先用文章寫的發表／上市時間，其次用新聞發布日；關注清單的既有機型若無時間則不計。"""
+    lp = rec.spec.launch_period or ""
+    m = _re.search(r"(20\d\d)\D{0,3}[Qq]([1-4])", lp) or _re.search(r"[Qq]([1-4])\D{0,3}(20\d\d)", lp)
+    if m:
+        y, q = (m.group(1), m.group(2)) if m.group(1).startswith("20") else (m.group(2), m.group(1))
+        return f"{y} Q{q}"
+    m = _re.search(r"(20\d\d)[-/年.\s]*(\d{1,2})", lp)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return f"{m.group(1)} Q{(int(m.group(2)) - 1) // 3 + 1}"
+    if rec.announced:
+        return f"{rec.announced.year} Q{(rec.announced.month - 1) // 3 + 1}"
+    return None
+
+
+def _size_bucket(r):
+    if r.spec.product_type == "aio":
+        return "AIO"
+    s = r.spec.size_inch or r.size_inferred
+    if not s:
+        return None
+    if s < 13.9:
+        return "13 吋以下"
+    if s < 15.0:
+        return "14 吋級"
+    if s < 16.0:
+        return "15.6 吋級"
+    if s < 17.0:
+        return "16 吋級"
+    return "17–18 吋"
+
+
+def _tech_bucket(r):
+    f = features(r.spec)
+    if "OLED" in f:
+        return "OLED"
+    if "Mini LED" in f:
+        return "Mini LED"
+    return "LCD" if r.spec.panel_tech else None
+
+
+def _refresh_bucket(r):
+    hz = r.spec.refresh_hz
+    if not hz:
+        return None
+    return "60Hz" if hz <= 75 else "90–120Hz" if hz <= 120 else "144–180Hz" if hz < 240 else "240Hz 以上"
+
+
+def _res_bucket(r):
+    w = r.spec.res_w
+    if not w:
+        return None
+    return "FHD 級" if w < 2200 else "2K–2.5K" if w < 2800 else "2.8K–3.2K" if w < 3400 else "4K 級"
+
+
+def _aspect_bucket(r):
+    a = r.aspect_ratio
+    return a if a in ("16:10", "16:9", "3:2") else ("其他" if a else None)
+
+
+def _surface_bucket(r):
+    from .derive import surface_code
+    c = surface_code(r.spec.surface)
+    if not c:
+        return None
+    return "AGLR" if "AGLR" in c else "AG" if "AG" in c else "BV／AR" if ("BV" in c or "AR" in c) else c
+
+
+TREND_DIMENSIONS = [
+    ("尺寸分布", _size_bucket, ["13 吋以下", "14 吋級", "15.6 吋級", "16 吋級", "17–18 吋", "AIO"]),
+    ("面板技術", _tech_bucket, ["OLED", "Mini LED", "LCD"]),
+    ("刷新率", _refresh_bucket, ["60Hz", "90–120Hz", "144–180Hz", "240Hz 以上"]),
+    ("解析度", _res_bucket, ["FHD 級", "2K–2.5K", "2.8K–3.2K", "4K 級"]),
+    ("長寬比", _aspect_bucket, ["16:10", "16:9", "3:2", "其他"]),
+    ("表面處理", _surface_bucket, ["AG", "AGLR", "BV／AR"]),
+    ("面板廠", lambda r: r.maker, None),
+]
+
+
+def quarterly_trends(records: list[PanelRecord], max_quarters: int = 4, min_models: int = 5) -> dict:
+    """各季新機的規格分布與季對季變化（百分點）。以機型為單位，每款取資料最完整的選配。"""
+    from .verify import _norm, model_norm
+    best: dict = {}
+    for r in records:
+        q = quarter_of(r)
+        if not q or r.confidence.rank < Confidence.C.rank:
+            continue
+        k = (_norm(r.spec.brand), model_norm(r.spec))
+        if k not in best or completeness(r)[0] > completeness(best[k])[0]:
+            best[k] = r
+    by_q: dict[str, list] = {}
+    for r in best.values():
+        by_q.setdefault(quarter_of(r), []).append(r)
+    quarters = sorted(by_q)[-max_quarters:]
+    usable = [q for q in quarters if len(by_q[q]) >= min_models]
+    dims = []
+    for name, fn, order in TREND_DIMENSIONS:
+        rows = []
+        all_vals = Counter()
+        for q in quarters:
+            vals = Counter(v for v in (fn(r) for r in by_q[q]) if v)
+            all_vals.update(vals)
+            rows.append({"quarter": q, "n": sum(vals.values()), "counts": vals})
+        buckets = order or [b for b, _ in all_vals.most_common(6)]
+        buckets = [b for b in buckets if all_vals.get(b)]
+        if not buckets:
+            continue
+        for row in rows:
+            row["share"] = {b: (row["counts"].get(b, 0) / row["n"]) if row["n"] else None for b in buckets}
+        shift = {}
+        if len(rows) >= 2 and rows[-1]["n"] >= min_models and rows[-2]["n"] >= min_models:
+            for b in buckets:
+                shift[b] = round((rows[-1]["share"][b] - rows[-2]["share"][b]) * 100)
+        dims.append({"name": name, "buckets": buckets, "rows": rows, "shift": shift})
+    return {"quarters": quarters, "models": {q: len(by_q[q]) for q in quarters}, "usable": usable, "dims": dims,
+            "comparable": len(usable) >= 2}

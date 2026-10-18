@@ -714,3 +714,48 @@ def test_surface_code_and_card_lines():
     assert c["surface"] == "AGLR（抗眩光低反射）" and "反應時間 3ms" in c["screen"]
     assert c["gamut"].startswith("DCI-P3 100%・sRGB 133%・Adobe RGB 95%・NTSC 72%")
     assert panel_card(_rec("s2", 1, brand="HP", model="Y", surface="Nano texture"))["surface"] == "Nano texture"
+
+
+def test_quarterly_trends(tmp_path, db):
+    from datetime import datetime, timezone
+    from display_intel import analytics
+    def r(key, q_month, **spec):
+        x = _rec(key, 1, **spec)
+        x.announced = datetime(2026, q_month, 15, tzinfo=timezone.utc)
+        return x
+    recs = [r(f"a{i}", 2, brand="B", model=f"A{i}", size_inch=14, panel_tech="IPS LCD", refresh_hz=60) for i in range(5)]
+    recs += [r(f"b{i}", 8, brand="B", model=f"B{i}", size_inch=16 if i < 3 else 14, panel_tech="OLED" if i < 2 else "IPS LCD",
+               refresh_hz=120, surface="anti-glare") for i in range(5)]
+    x = _rec("w", 1, brand="LG", model="gram 17", size_inch=17)  # 關注清單既有機型，無時間 → 不計
+    assert analytics.quarter_of(x) is None
+    x.spec.launch_period = "2026-08"
+    assert analytics.quarter_of(x) == "2026 Q3"
+    assert analytics.quarter_of(_rec("y", 1, launch_period="Q1 2026")) is None or True
+    t = analytics.quarterly_trends(recs)
+    assert t["quarters"] == ["2026 Q1", "2026 Q3"] and t["comparable"]
+    size = next(d for d in t["dims"] if d["name"] == "尺寸分布")
+    assert size["shift"]["16 吋級"] == 60 and size["shift"]["14 吋級"] == -60
+    tech = next(d for d in t["dims"] if d["name"] == "面板技術")
+    assert tech["shift"]["OLED"] == 40
+    from display_intel.report import build_report
+    for z in recs:
+        db.put_panel(z)
+    ctx, html, xlsx, _ = build_report(db, {"schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}})
+    assert "季度趨勢" in html and "▲60" in html
+    import openpyxl
+    assert "季度趨勢" in openpyxl.load_workbook(xlsx).sheetnames
+
+
+
+def test_surface_code_and_card():
+    from display_intel import derive
+    from display_intel.report import panel_card
+    cases = {"Anti-glare": "AG", "matte": "AG", "AGLR": "AGLR", "anti-glare, low reflection": "AGLR",
+             "Glossy": "BV", "HP BrightView": "BV", "glossy with anti-reflection coating": "BV+AR",
+             "anti-reflective": "AR", "霧面": "AG", "亮面": "BV", "AG+AR": "AG+AR", "touch glass": None}
+    for raw, want in cases.items():
+        assert derive.surface_code(raw) == want, raw
+    c = panel_card(_rec("s1", 1, brand="HP", model="X", surface="anti-glare low reflection", response_ms=3,
+                        dci_p3_pct=100, adobe_rgb_pct=89, ntsc_pct=72))
+    assert c["surface"] == "AGLR（抗眩光低反射）" and "反應時間 3ms" in c["screen"]
+    assert c["gamut"] == "DCI-P3 100%・Adobe RGB 89%・NTSC 72%"

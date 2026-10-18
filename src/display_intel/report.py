@@ -237,6 +237,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
         "to_fill": analytics.to_fill(all_records, today),
         "platform_matrix": ihv.platform_matrix(all_records, today),
+        "quarterly": analytics.quarterly_trends(all_records),
         "watch": watch_rows(db, cfg, all_records, set(grouped)),
     }
     # 卡片依機型合併（螢幕選配列在同一張卡片內）
@@ -415,6 +416,19 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
         sheet(ws7, ["關注項目", "可信度", "完整度"] + [FIELD_LABELS[f] for f in fields] + ["PPI", "最後更新", "來源", "網址"],
               sorted(rows7, key=lambda r: (r[0], r[4] or "")))
         ws7.auto_filter.ref = ws7.dimensions
+    qt = ctx.get("quarterly")
+    if qt and qt["dims"]:
+        ws8 = wb.create_sheet("季度趨勢")
+        rows8 = []
+        for d in qt["dims"]:
+            for row in d["rows"]:
+                for b in d["buckets"]:
+                    share = row["share"].get(b)
+                    rows8.append([d["name"], row["quarter"], row["n"], b, row["counts"].get(b, 0),
+                                  round(share * 100, 1) if share is not None else None,
+                                  d["shift"].get(b) if row is d["rows"][-1] else None])
+        sheet(ws8, ["項目", "季度", "有標示的機型數", "分類", "款數", "占比 %", "季變化（百分點）"], rows8)
+        ws8.auto_filter.ref = ws8.dimensions
     ws6 = wb.create_sheet("平台適配")
     names = [i["name"] for i in ihv.evaluate(PanelSpec())]
     sheet(ws6, ["品牌", "機型", "螢幕", "處理器", "處理器平台", "顯示卡", "獨顯廠商", "顯示切換"] + names + ["說明"],

@@ -121,13 +121,15 @@ def _derived(rec: PanelRecord) -> PanelRecord:
     return rec
 
 
-def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, flags: list[str]) -> PanelEvent | None:
+def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, flags: list[str],
+                use_article_date: bool = True) -> PanelEvent | None:
     key = panel_key(spec)
     now = utcnow()
     existing = find_existing(db, spec)
     if existing is None:
         rec = _derived(PanelRecord(key=key, spec=spec, confidence=conf, source_url=article.url,
-                                   source_name=article.source, first_seen=now, last_updated=now, flags=flags))
+                                   source_name=article.source, first_seen=now, last_updated=now, flags=flags,
+                                   announced=article.published or now))
         db.put_panel(rec)
         return PanelEvent(kind="new", record=rec)
 
@@ -199,8 +201,12 @@ def ingest(db: DB, results: list[tuple[RawArticle, Extraction, list[str]]], tag:
     for article, ex, flags in results:
         conf = confidence_for(article, ex.is_rumor)
         for spec in ex.panels:
-            ev = merge_panel(db, spec, conf, article, flags)
+            ev = merge_panel(db, spec, conf, article, flags, use_article_date=(tag != "watch"))
             if ev and ev.record.confidence != Confidence.E:
+                if tag == "watch" and ev.kind == "new":
+                    # 關注清單主動建檔的是既有機型，發表時間不明，不計入新聞當季
+                    ev.record.announced = None
+                    db.put_panel(ev.record)
                 payload = ev.model_dump(mode="json")
                 if tag:
                     payload["tag"] = tag

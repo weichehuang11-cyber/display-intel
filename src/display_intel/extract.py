@@ -42,6 +42,7 @@ SYSTEM_PROMPT = """你是筆電顯示器產業分析師，負責從新聞中萃�
     品牌的螢幕行銷名稱（如 ASUS Lumina OLED、Lenovo PureSight、Dell InfinityEdge）填在 display_marketing_name，
     不可填進 panel_maker 或 panel_model；行銷名稱不代表面板製造商。
 14. surface：照原文寫表面處理（例如 anti-glare、AGLR、anti-reflection coating、glossy、BrightView、霧面），不要改寫或翻譯。
+16. launch_period：文章明確寫出發表或上市時間才填，格式 YYYY-MM 或 YYYY Qn（例如 2026-01、2026 Q3），要附原文；不要用文章日期猜。
 15. 色域：文章寫哪個標準就填哪個（DCI-P3、sRGB、Adobe RGB、NTSC 各自獨立），不要換算；response_ms 填文章寫的反應時間數字。"""
 
 FIELD_GUIDE = """輸出格式：
@@ -55,7 +56,7 @@ FIELD_GUIDE = """輸出格式：
     "refresh_hz","vrr_range","response_ms","vrr_tech":[],
     "backlight","mini_led_zones","dimming","pwm_hz",
     "low_power_tech":[],"eye_care":[],"touch"(true/false),"stylus","glass","screen_to_body_pct","form_factor",
-    "cpu_platform","gpu","gpu_switching","platform_certifications":[],"display_power_tech":[],
+    "cpu_platform","gpu","gpu_switching","platform_certifications":[],"display_power_tech":[],"launch_period",
     "evidence": {"欄位名": "原文片段"} } ],
   "platform_techs": [ {"vendor","tech_name",
     "category"(sync|power|image|interface|certification|other),
