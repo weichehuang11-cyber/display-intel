@@ -96,6 +96,26 @@ def aspect_ratio(res_w: Optional[int], res_h: Optional[int]) -> Optional[str]:
     return f"{res_w // g}:{res_h // g}"
 
 
+# 16:9 面板的標準對角線：文章常把 17.3 吋寫成 17 吋、15.6 寫成 15、16.1 寫成 16、13.3 寫成 13
+STANDARD_16_9 = {13: 13.3, 15: 15.6, 16: 16.1, 17: 17.3}
+
+
+def actual_size(size: Optional[float], res_w: Optional[int], res_h: Optional[int],
+                decoded: Optional[float] = None) -> Optional[float]:
+    """文章寫的是整數吋時，推算實際對角線。回傳 None 表示不需修正。
+
+    1. 面板型號推算的尺寸和文章相差 0.6 吋以內 → 以型號為準（例如 17 吋＋NE173… → 17.3）
+    2. 否則只在解析度是 16:9 時，套用 16:9 標準尺寸（16:10 的 17 吋是真的 17.0，例如 LG gram 17）
+    """
+    if not size:
+        return None
+    if decoded and decoded != size and abs(decoded - size) <= 0.6:
+        return decoded
+    if size == int(size) and aspect_ratio(res_w, res_h) == "16:9":
+        return STANDARD_16_9.get(int(size))
+    return None
+
+
 def density_class(value: Optional[float]) -> Optional[str]:
     if value is None:
         return None
@@ -135,6 +155,67 @@ def quote_in_text(quote: str, text: str) -> bool:
     return q in _norm(text)
 
 
+# ---------- 數值必須出現在原文片段 ----------
+NUMERIC_FIELDS = [f for f, fi in PanelSpec.model_fields.items()
+                  if str(fi.annotation) in ("typing.Optional[float]", "typing.Optional[int]")]
+# 不會混淆的標準解析度名稱（「4K」「2.8K」「QHD+」「FHD+」有歧義，不接受）
+RES_NAMES = [(r"\bwuxga\b", (1920, 1200)), (r"\bwqxga\b", (2560, 1600)), (r"\bwqhd\b(?!\+)|\bqhd\b(?!\+)|\b1440p\b", (2560, 1440)),
+             (r"\buhd\b(?!\+)|\b2160p\b", (3840, 2160)), (r"\bfull[\s-]?hd\b(?!\+)|\bfhd\b(?!\+)|\b1080p\b|全高清(?!\+)", (1920, 1080))]
+# 色數與色深的標準換算
+COLOR_COUNTS = [(r"16\.7\s*(?:million|m\b)|1670\s*万|1670\s*萬", 8), (r"1\.07\s*(?:billion|b\b)|10\.7\s*亿|10\.7\s*億", 10)]
+
+
+def quote_numbers(quote: str) -> set[float]:
+    """原文片段中的數字（處理千分位 1,920／1.499 與全形字）。"""
+    q = unicodedata.normalize("NFKC", quote)
+    q = re.sub(r"(?<=\d)[,.](?=\d{3}(?!\d))", "", q)
+    # 緊接在英文字母後面的數字是型號的一部分（ProArt P16、ROG G14），不算
+    #（「2560x1600」的 x 是乘號，例外）
+    return {float(x) for x in re.findall(r"(?:(?<![A-Za-z\d.])|(?<=\d[xX]))\d+(?:\.\d+)?", q)}
+
+
+def value_supported(field: str, value, quote: str, res: tuple | None = None) -> bool:
+    """數值欄位：原文片段裡要真的有這個數字（或不會混淆的標準名稱／換算）。"""
+    if value is None or field not in NUMERIC_FIELDS:
+        return True
+    if float(value) in quote_numbers(quote):
+        return True
+    low = unicodedata.normalize("NFKC", quote).lower()
+    if field in ("res_w", "res_h") and res:
+        return any(re.search(p, low) and r == res for p, r in RES_NAMES)
+    if field == "color_depth_bit":
+        return any(re.search(p, low) and b == int(value) for p, b in COLOR_COUNTS)
+    return False
+
+
+def unsupported_values(spec: PanelSpec, skip: set | frozenset = frozenset()) -> list[str]:
+    """有原文片段、但片段裡沒有這個數字的欄位（解析度寬高一起判斷）。"""
+    bad = []
+    res = (spec.res_w, spec.res_h) if spec.res_w and spec.res_h else None
+    # 解析度寬高合併判斷（來源常把「3,840×2,400」拆成兩段引用）
+    res_quote = " ".join(str(spec.evidence[k]) for k in ("res_w", "res_h") if spec.evidence.get(k))
+    for f in NUMERIC_FIELDS:
+        v = getattr(spec, f)
+        if v is None or f in skip:
+            continue
+        quote = res_quote if f in ("res_w", "res_h") else spec.evidence.get(f)
+        if quote and not value_supported(f, v, str(quote), res):
+            bad.append(f)
+    if "res_w" in bad or "res_h" in bad:
+        bad = [f for f in bad if f not in ("res_w", "res_h")] + [f for f in ("res_w", "res_h") if getattr(spec, f) is not None]
+    return bad
+
+
+def find_res_quote(text: str, w: int, h: int) -> Optional[str]:
+    """在全文找明確寫出的解析度（例如「3,840 x 2,400」「2880×1800」），回傳原文片段。"""
+    fmt = lambda n: f"{n:,}".replace(",", r"[,.]?")
+    m = re.search(rf"{fmt(w)}\s*(?:[x×*]|by)\s*{fmt(h)}", unicodedata.normalize("NFKC", text), re.I)
+    if not m:
+        return None
+    t = unicodedata.normalize("NFKC", text)
+    return re.sub(r"\s+", " ", t[max(0, m.start() - 15):m.end() + 15]).strip()
+
+
 def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
     """移除沒有原文依據的欄位，回傳（清理後的規格, 被移除的欄位）。
 
@@ -157,7 +238,25 @@ def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
         data[field] = None
         dropped.append(field)
     data["evidence"] = evidence
-    return PanelSpec(**data), dropped
+    spec = PanelSpec(**data)
+    # 原文片段裡要真的有這個數字（擋下「4K」被換算成 3840×2160、新聞標題被當成尺寸依據這類情況）
+    bad = unsupported_values(spec)
+    if bad and spec.res_w and spec.res_h and "res_w" in bad:
+        # AI 引用的片段沒有數字，但全文其他地方明確寫了 → 改用那段原文當依據
+        q = find_res_quote(text, spec.res_w, spec.res_h)
+        if q:
+            data = spec.model_dump()
+            data["evidence"]["res_w"] = data["evidence"]["res_h"] = q
+            spec = PanelSpec(**data)
+            bad = unsupported_values(spec)
+    if bad:
+        data = spec.model_dump()
+        for f in bad:
+            data[f] = None
+            data["evidence"].pop(f, None)
+        spec = PanelSpec(**data)
+        dropped += [f"{f}（原文片段沒有這個數字）" for f in bad]
+    return spec, dropped
 
 
 def clean_price(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:

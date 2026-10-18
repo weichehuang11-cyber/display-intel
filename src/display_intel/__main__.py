@@ -62,6 +62,7 @@ def cmd_collect(cfg: dict, args) -> int:
             base = cfg["llm"]["extract_model"]
             cfg["llm"]["fallback_models"] = [base] + [m for m in cfg["llm"].get("fallback_models", []) if m != base]
             cfg["llm"]["extract_model"] = run["extract_model"]
+        stats["rederived"] = verify.rederive_all(db)  # 衍生規格規則更新時，舊資料也套用新規則
         llm = _working_llm(cfg, stats)
         if llm is None:
             log.error("AI 無法使用，今天跳過萃取。原因：%s", stats["llm_probe"])

@@ -217,6 +217,9 @@ class PanelRecord(BaseModel):
     # 由面板型號推算（文章沒寫時才用，報告會標示「推算」）
     panel_maker_inferred: Optional[str] = None
     size_inferred: Optional[float] = None
+    # 文章寫整數吋（例如「17 吋」）時推算的實際對角線（例如 17.3）；有面板型號以型號為準，否則依 16:9 標準尺寸
+    size_corrected: Optional[float] = None
+    res_inferred: Optional[str] = None  # 文章沒寫解析度時，由面板型號解析度代碼推算，例如 "1920×1200"
     flags: list[str] = Field(default_factory=list)  # 查核發現的問題
     # 規格補完紀錄
     enrich_attempts: int = 0

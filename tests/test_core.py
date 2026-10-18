@@ -306,9 +306,9 @@ def test_weekly_cadence(db, tmp_path):
 
 def test_panel_decode():
     from display_intel.panel_decode import canonical_maker, decode
-    assert decode("NE160QDM-NY1") == {"maker": "BOE", "size_inch": 16.0}
-    assert decode("ATNA56YX03") == {"maker": "Samsung Display", "size_inch": 15.6}
-    assert decode("B140HAN06.8") == {"maker": "AUO", "size_inch": 14.0}
+    assert decode("NE160QDM-NY1") == {"maker": "BOE", "size_inch": 16.0, "res": None}
+    assert decode("ATNA56YX03") == {"maker": "Samsung Display", "size_inch": 15.6, "res": None}
+    assert decode("B140HAN06.8") == {"maker": "AUO", "size_inch": 14.0, "res": None}
     assert decode("N156HCA-EAC")["maker"] == "Innolux"
     assert decode("LP160UQ1-SPB1")["maker"] == "LG Display"
     assert decode("XYZ123") is None
@@ -1070,3 +1070,55 @@ def test_price_fields_and_bands():
     assert m["rows"][1]["touch"] == (100, 1) and m["rows"][2]["sdr"] == 500
     assert analytics._price_bucket(recs[3]) == "US$2,000 以上"
     analytics.configure_price({})
+
+
+
+def test_actual_size_and_res_codes():
+    from display_intel import panel_decode
+    from display_intel.panel_decode import configure_res_codes, decode
+    from display_intel.report import compare_row
+    # 解析度代碼：WU = 1920×1200、WQ = 2560×1600；config 可增加（含指定面板廠）
+    configure_res_codes({})
+    assert decode("NV140WUM-N4N")["res"] == (1920, 1200) and decode("LP160WQ1-SPA1")["res"] == (2560, 1600)
+    configure_res_codes({"panel_res_codes": {"AUO:UA": "1920x1200"}})
+    assert decode("B160UAN01.Q")["res"] == (1920, 1200) and decode("N160UAE-EA1")["res"] is None
+    # 17 吋＋16:9 → 實際 17.3；16:10 的 17 吋是真的 17.0；有面板型號以型號為準
+    omen = _rec("s1", 1, brand="HP", model="OMEN 17", size_inch=17, res_w=1920, res_h=1080)
+    gram = _rec("s2", 1, brand="LG", model="gram 17", size_inch=17, res_w=2560, res_h=1600)
+    p = _rec("s3", 1, brand="X", model="Y", size_inch=16, res_w=2560, res_h=1600, panel_model="NE161QHM-NX1")
+    q = _rec("s4", 1, brand="X", model="Z", size_inch=16, panel_model="LP160WQ1-SPA1")
+    assert omen.size_corrected == 17.3 and omen.ppi == 127.3 and compare_row(omen)["size"] == '17.3"*'
+    assert gram.size_corrected is None and compare_row(gram)["size"] == '17"'
+    assert p.size_corrected == 16.1
+    assert q.res_inferred == "2560×1600" and compare_row(q)["res"] == "2560×1600*"
+    from display_intel import health
+    bad = _rec("s5", 1, brand="X", model="W", size_inch=16, res_w=1920, res_h=1080, panel_model="LP160WQ1-SPA1")
+    assert any("2560×1600" in i for i in health.consistency_issues(bad))
+    configure_res_codes({})
+
+
+def test_numbers_must_appear_in_evidence():
+    text = ("Asus releases ProArt P16 with 4K 120Hz OLED display. The 16-inch panel covers nearly the entire sRGB color gamut "
+            "and shows 1.07 billion colors at 500 nits. 解像度は3,840×2,400ピクセル。")
+    spec = PanelSpec(brand="ASUS", model="ProArt P16", size_inch=16, res_w=3840, res_h=2400, srgb_pct=100, color_depth_bit=10,
+                     sdr_nits=500, refresh_hz=120,
+                     evidence={"size_inch": "Asus releases ProArt P16", "res_w": "4K 120Hz OLED display", "res_h": "4K 120Hz OLED display",
+                               "srgb_pct": "nearly the entire sRGB color gamut", "color_depth_bit": "1.07 billion colors",
+                               "sdr_nits": "500 nits", "refresh_hz": "4K 120Hz OLED display"})
+    s, flags = derive.clean_spec(spec, text)
+    assert s.size_inch is None and s.srgb_pct is None  # 片段裡沒有 16、100 → 移除
+    assert (s.res_w, s.res_h) == (3840, 2400) and "3,840×2,400" in s.evidence["res_w"]  # 全文有明寫 → 改用那段原文
+    assert s.color_depth_bit == 10 and s.sdr_nits == 500 and s.refresh_hz == 120
+    # 「4K」有歧義，全文也沒寫數字 → 移除；FHD 是標準名稱 → 接受
+    s2, _ = derive.clean_spec(PanelSpec(brand="ASUS", model="ProArt P16", res_w=3840, res_h=2160,
+                                        evidence={"res_w": "4K 120Hz OLED display"}), "ASUS ProArt P16 4K 120Hz OLED display")
+    assert s2.res_w is None and s2.res_h is None
+    s3, _ = derive.clean_spec(PanelSpec(brand="HP", model="OMEN 17", res_w=1920, res_h=1080, evidence={"res_w": "FHD 144Hz", "res_h": "FHD 144Hz"}),
+                              "HP OMEN 17 FHD 144Hz IPS")
+    assert (s3.res_w, s3.res_h) == (1920, 1080)
+    assert derive.quote_numbers("1,920×1,200ドット DCI-P3 100％ €1.499") >= {1920.0, 1200.0, 100.0, 1499.0}
+    # 舊資料：片段裡沒有數字的移除並留下紀錄；人工更正不動
+    old = _rec("v1", 1, brand="HP", model="Z", size_inch=16, res_w=3840, res_h=2160,
+               evidence={"size_inch": "16-inch", "res_w": "4K", "res_h": "4K"})
+    assert verify.recheck_values(old) == ["res_w", "res_h"] and old.spec.size_inch == 16 and old.spec.res_w is None
+    assert any("res_w=3840" in f for f in old.flags)

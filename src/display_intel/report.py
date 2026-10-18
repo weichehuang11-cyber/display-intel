@@ -149,13 +149,16 @@ def _current_record(db: DB, ev: dict) -> PanelRecord:
 
 def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | None = None) -> dict:
     s = rec.spec
-    if s.size_inch:
+    if s.size_inch and rec.size_corrected:
+        size = f'{s.size_inch:g}"（實際 {rec.size_corrected:g}"，推算）'
+    elif s.size_inch:
         size = f'{s.size_inch:g}"'
     elif rec.size_inferred:
         size = f'{rec.size_inferred:g}"（推算）'
     else:
         size = ""
-    screen = "・".join(x for x in [size, s.panel_tech or "", f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else "",
+    screen = "・".join(x for x in [size, s.panel_tech or "", f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h
+                                   else (f"{rec.res_inferred}（由型號推算）" if rec.res_inferred else ""),
                                    f"{s.refresh_hz:g}Hz" if s.refresh_hz else "",
                                    f"反應時間 {s.response_ms:g}ms" if s.response_ms else ""] if x)
     code = derive.surface_code(s.surface)
@@ -606,6 +609,8 @@ def build_report(db: DB, cfg: dict, llm=None) -> tuple[dict, str, Path, list[int
     """產生報告。回傳（內容, HTML, Excel 路徑, 已報告的事件 id）。"""
     tz = ZoneInfo(cfg["schedule"].get("timezone", "Asia/Taipei"))
     today = datetime.now(tz)
+    from .verify import rederive_all
+    rederive_all(db)  # 衍生規格規則更新時，舊資料也套用新規則
     events = db.unreported_events()
     ctx = build_context(events, db, cfg, today)
     ctx["_cfg"] = cfg
@@ -645,9 +650,10 @@ def compare_row(rec: PanelRecord, label: str = "", option: str = "", extra: dict
     k, t = analytics.completeness(rec)
     return {
         "rec": rec, "label": label, "option": option, "segment": _segment(rec),
-        "size": f'{s.size_inch:g}"' if s.size_inch else (f'{rec.size_inferred:g}"*' if rec.size_inferred else "—"),
+        "size": (f'{rec.size_corrected:g}"*' if rec.size_corrected else f'{s.size_inch:g}"') if s.size_inch
+                else (f'{rec.size_inferred:g}"*' if rec.size_inferred else "—"),
         "tech": s.panel_tech or "—",
-        "res": f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else "—", "aspect": rec.aspect_ratio if rec.aspect_ratio and len(rec.aspect_ratio) <= 5 else "",
+        "res": f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else (f"{rec.res_inferred}*" if rec.res_inferred else "—"), "aspect": rec.aspect_ratio if rec.aspect_ratio and len(rec.aspect_ratio) <= 5 else "",
         "refresh": f"{s.refresh_hz:g}Hz" if s.refresh_hz else "—",
         "response": f"{s.response_ms:g}ms" if s.response_ms else "",
         "sdr": f"{s.sdr_nits:g}" if s.sdr_nits else "—", "hdr": f"{s.hdr_peak_nits:g}" if s.hdr_peak_nits else "",
@@ -784,7 +790,7 @@ def _j(v) -> str:
 COMPARE_COLUMNS = [
     ("基本", "機型", lambda r: r["label"], None, 26),
     ("基本", "選配", lambda r: r["option"], None, 9),
-    ("基本", "尺寸", lambda r: r["rec"].spec.size_inch or r["rec"].size_inferred, None, 7),
+    ("基本", "尺寸", lambda r: r["rec"].size_corrected or r["rec"].spec.size_inch or r["rec"].size_inferred, None, 7),
     ("基本", "面板", lambda r: r["rec"].spec.panel_tech, None, 9),
     ("基本", "解析度", lambda r: r["res"] if r["res"] != "—" else "", None, 12),
     ("基本", "長寬比", lambda r: r["aspect"], None, 8),
@@ -839,6 +845,9 @@ def source_note(rec: PanelRecord, field: str) -> str:
     fs = rec.source_of(field)
     quote = rec.spec.evidence.get(field) or ""
     lines = [f"出處：{fs.label}"]
+    if field == "size_inch" and rec.size_corrected:
+        lines.insert(0, f"文章寫 {rec.spec.size_inch:g} 吋，實際應為 {rec.size_corrected:g} 吋（推算："
+                        + ("依面板型號" if rec.spec.panel_model else "16:9 面板標準尺寸") + "）")
     if fs.url:
         lines.append(fs.url[:120])
     if quote:

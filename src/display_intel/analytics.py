@@ -337,7 +337,7 @@ def quarter_of(rec: PanelRecord) -> Optional[str]:
 def _size_bucket(r):
     if r.spec.product_type == "aio":
         return "AIO"
-    s = r.spec.size_inch or r.size_inferred
+    s = r.size_corrected or r.spec.size_inch or r.size_inferred
     if not s:
         return None
     if s < 13.9:

@@ -168,6 +168,8 @@ def consistency_issues(rec: PanelRecord) -> list[str]:
     dec = decode(s.panel_model)
     if dec and dec.get("size_inch") and s.size_inch and abs(dec["size_inch"] - s.size_inch) > 0.6:
         out.append(f"面板型號 {s.panel_model} 推算為 {dec['size_inch']:g} 吋，與機型 {s.size_inch:g} 吋不符")
+    if dec and dec.get("res") and s.res_w and (s.res_w, s.res_h) != dec["res"]:
+        out.append(f"面板型號 {s.panel_model} 的解析度代碼推算為 {dec['res'][0]}×{dec['res'][1]}，與報導 {s.res_w}×{s.res_h} 不符")
     if dec and s.panel_maker and canonical_maker(s.panel_maker) != dec["maker"]:
         out.append(f"面板型號推算為 {dec['maker']}，報導寫 {s.panel_maker}")
     if s.touch is False and s.stylus:

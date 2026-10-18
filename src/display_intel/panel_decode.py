@@ -47,6 +47,20 @@ MAKER_ALIASES = {
 
 KNOWN_MAKERS = set(MAKER_ALIASES)
 
+# 面板型號中「尺寸數字後面兩個字母」的解析度代碼，例如 LP160WQ1 → WQ、NE160WUM → WU
+# 預設只放確認過的代碼；config.yaml 的 panel_res_codes 可增加（也可寫「AUO:UA」只套用某家面板廠）
+DEFAULT_RES_CODES = {"WU": (1920, 1200), "WQ": (2560, 1600)}
+RES_CODES: dict[str, tuple[int, int]] = dict(DEFAULT_RES_CODES)
+
+
+def configure_res_codes(cfg: dict):
+    RES_CODES.clear()
+    RES_CODES.update(DEFAULT_RES_CODES)
+    for code, res in (cfg.get("panel_res_codes") or {}).items():
+        m = re.fullmatch(r"\s*(\d{3,4})\s*[x×*]\s*(\d{3,4})\s*", str(res))
+        if m:
+            RES_CODES[str(code).strip().upper()] = (int(m.group(1)), int(m.group(2)))
+
 # EDID 面板識別碼（3 個字母廠商代碼＋4 位十六進位），評測網站常以這種格式標示，例如 BOE0AAE、SDC4189
 EDID_VENDORS = {"BOE": "BOE", "AUO": "AUO", "SDC": "Samsung Display", "LGD": "LG Display", "CMN": "Innolux",
                 "SHP": "Sharp", "CSO": "CSOT", "IVO": "InfoVision", "TMA": "Tianma", "NCP": "Visionox"}
@@ -73,7 +87,7 @@ def decode(panel_model: Optional[str]) -> Optional[dict]:
     m_str = re.sub(r"[\s\-]", "", panel_model.upper())
     edid = re.fullmatch(r"([A-Z]{3})([0-9A-F]{4})", m_str)
     if edid and edid.group(1) in EDID_VENDORS:
-        return {"maker": EDID_VENDORS[edid.group(1)], "size_inch": None}
+        return {"maker": EDID_VENDORS[edid.group(1)], "size_inch": None, "res": None}
     for pattern, maker, size_mode in RULES:
         m = re.match(pattern, m_str)
         if not m:
@@ -85,7 +99,11 @@ def decode(panel_model: Optional[str]) -> Optional[dict]:
             size = 10 + int(m.group(1)) + int(m.group(2)) / 10
         if size is not None and not 10 <= size <= 35:
             size = None
-        return {"maker": maker, "size_inch": size}
+        res = None
+        if size_mode == "3d":
+            code = m_str[m.end(1):m.end(1) + 2]
+            res = RES_CODES.get(f"{maker.upper()}:{code}") or RES_CODES.get(code)
+        return {"maker": maker, "size_inch": size, "res": res}
     return None
 
 
@@ -111,5 +129,5 @@ def find_panel_ids(text: str) -> list[dict]:
         seen.add(pid)
         start, end = max(0, m.start() - 40), min(len(text), m.end() + 40)
         quote = re.sub(r"\s+", " ", text[start:end]).strip()
-        out.append({"id": pid, "maker": dec["maker"], "size_inch": dec["size_inch"], "quote": quote})
+        out.append({"id": pid, "maker": dec["maker"], "size_inch": dec["size_inch"], "res": dec.get("res"), "quote": quote})
     return out

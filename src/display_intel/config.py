@@ -23,6 +23,13 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
 
 
 def load_config(path: str | Path | None = None) -> dict:
+    cfg = _load_config(path)
+    from .panel_decode import configure_res_codes
+    configure_res_codes(cfg)
+    return cfg
+
+
+def _load_config(path: str | Path | None = None) -> dict:
     load_dotenv()
     path = Path(path) if path else ROOT / "config.yaml"
     with open(path, encoding="utf-8") as f:

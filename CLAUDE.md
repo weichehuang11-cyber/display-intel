@@ -35,8 +35,8 @@ demo.py     虛構範例資料，不需金鑰即可產生報告
 
 ## 核心規則（修改時務必維持）
 
-1. **防幻覺**：每個規格欄位都必須有逐字出自文章的 evidence，否則 `derive.enforce_evidence` 會刪除。不要放寬這條規則。
-2. **衍生規格由程式計算**，不從文章抄。
+1. **防幻覺**：每個規格欄位都必須有逐字出自文章的 evidence，否則 `derive.enforce_evidence` 會刪除；數值欄位的 evidence 裡必須真的有該數字（`derive.unsupported_values`：解析度寬高合併判斷、型號字母後的數字不算、只接受無歧義標準名稱 RES_NAMES 與色數換算 COLOR_COUNTS；新資料可用 `find_res_quote` 從全文找明寫的解析度補救；舊資料由 `verify.recheck_values` 在 `rederive_all` 時套用）。不要放寬這條規則。
+2. **衍生規格由程式計算**，不從文章抄。`verify._derived`：`size_corrected`（`derive.actual_size`：整數吋＋16:9 → STANDARD_16_9，或面板型號尺寸）、`res_inferred`（`panel_decode` 的 RES_CODES，config `panel_res_codes`）；`rederive_all` 在 collect 開始與 build_report 前執行，規則更新時舊資料自動套用。
 3. **可信度（欄位層級）**：A 官方、B 實測、C 媒體／彙整、D 傳聞、E 待確認（不進報告）。每個欄位記在 `PanelRecord.field_sources`（`FieldSource`：url、conf、kind=article/panel_datasheet/manual/record），讀取一律用 `rec.source_of(f)`（舊資料沿用整筆來源）。新數值只有比「該欄位目前來源」更可信才覆蓋；同等級不同值記 `來源數值不一致` flag（含兩個網域）；更可信來源證實同值時出處升級、原來源改列 `corroborated`；`kind="manual"` 永不被覆蓋。D 被 C 以上證實時產生 `rumor_confirmed` 事件。
 4. **單一來源或單批失敗不中斷流程**；額度用完（`BudgetExceeded`）時停止萃取，用已完成的部分出報告。
 5. **排定時間一定要寄出**：報告失敗時寄失敗通知給 SMTP_USER。

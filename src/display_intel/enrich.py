@@ -184,11 +184,13 @@ def assign_panel_ids(db: DB, group: list[PanelRecord], pages: list[RawArticle]) 
         if not ids:
             continue
         for rec in list(missing):
-            size = rec.spec.size_inch or rec.size_inferred
+            size = rec.size_corrected or rec.spec.size_inch or rec.size_inferred
             if size:
                 cands = [i for i in ids if i["size_inch"] and abs(i["size_inch"] - size) <= 0.6]
             else:
                 cands = []
+            if rec.spec.res_w:  # 型號裡的解析度代碼（WU、WQ…）和這個選配的解析度不同 → 排除
+                cands = [i for i in cands if not i.get("res") or i["res"] == (rec.spec.res_w, rec.spec.res_h)]
             if not cands and len(missing) == 1 and len(ids) == 1 and ids[0]["size_inch"] is None:
                 cands = ids  # EDID 識別碼
             if len({c["id"] for c in cands}) != 1:

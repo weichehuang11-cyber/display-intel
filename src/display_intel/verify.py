@@ -102,11 +102,13 @@ def dedupe_articles(articles: list[RawArticle], db: DB, threshold: float = 0.85)
 
 def _derived(rec: PanelRecord) -> PanelRecord:
     s = rec.spec
-    rec.ppi = derive.ppi(s.res_w, s.res_h, s.size_inch)
+    dec = decode(s.panel_model)
+    rec.size_corrected = derive.actual_size(s.size_inch, s.res_w, s.res_h, dec["size_inch"] if dec else None)
+    rec.res_inferred = (f"{dec['res'][0]}×{dec['res'][1]}" if dec and dec.get("res") and not s.res_w else None)
+    rec.ppi = derive.ppi(s.res_w, s.res_h, rec.size_corrected or s.size_inch)
     rec.pixel_count = s.res_w * s.res_h if s.res_w and s.res_h else None
     rec.aspect_ratio = derive.aspect_ratio(s.res_w, s.res_h)
     rec.density_class = derive.density_class(rec.ppi)
-    dec = decode(s.panel_model)
     rec.panel_maker_inferred = None
     rec.size_inferred = None
     if dec:
@@ -119,6 +121,38 @@ def _derived(rec: PanelRecord) -> PanelRecord:
         if not s.size_inch and dec["size_inch"]:
             rec.size_inferred = dec["size_inch"]
     return rec
+
+
+def recheck_values(rec: PanelRecord) -> list[str]:
+    """舊資料套用「數字必須出現在原文片段」規則：移除片段裡沒有該數字的數值（人工更正與面板原廠規格除外）。"""
+    skip = {f for f, fs in rec.field_sources.items() if fs.kind in ("manual", "panel_datasheet")} | set(rec.panel_spec_fields)
+    bad = derive.unsupported_values(rec.spec, skip)
+    if not bad:
+        return []
+    data = rec.spec.model_dump()
+    for f in bad:
+        note = f"原文片段沒有這個數字，已移除：{f}={data[f]}（依據：{str(data['evidence'].get(f) or data['evidence'].get('res_w') or '')[:40]}）"
+        data[f] = None
+        data["evidence"].pop(f, None)
+        rec.field_sources.pop(f, None)
+        rec.corroborated.pop(f, None)
+        if note not in rec.flags:
+            rec.flags.append(note)
+    rec.spec = PanelSpec(**data)
+    return bad
+
+
+def rederive_all(db: DB) -> int:
+    """衍生規格規則更新後，重算全部紀錄（PPI、實際尺寸、型號推算等），並套用最新的原文數值檢查。回傳有變動的筆數。"""
+    n = 0
+    for rec in db.all_panels():
+        before = rec.model_dump_json()
+        recheck_values(rec)
+        rec = _derived(rec)
+        if rec.model_dump_json() != before:
+            db.put_panel(rec)
+            n += 1
+    return n
 
 
 def _domain(url: str | None) -> str:
