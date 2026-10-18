@@ -155,6 +155,8 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
             continue
         identity = f in ("brand", "model")
         src = existing.source_of(f)
+        if src.kind == "manual" and not identity:
+            continue  # 人工更正永遠優先（包含「確認是錯的、保持空白」）
         if ov in (None, [], ""):
             old[f] = nv
             changes[f] = [None, nv]
@@ -178,8 +180,6 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
                 if sdom and sdom not in seen and sdom != dom:
                     seen.append(sdom)
         else:
-            if src.kind == "manual":
-                continue  # 人工更正永遠優先
             # 欄位層級比較：只有比「這個欄位目前來源」更可信才覆蓋
             frank = src.conf.rank if not identity else existing.confidence.rank
             if conf.rank > frank:

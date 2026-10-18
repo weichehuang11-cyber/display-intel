@@ -272,6 +272,23 @@ report:
   output_dir: output
   database: data/intel.sqlite
 
+# 人工更正：你確認過的資訊寫在這裡，以「人工更正」為準，網路資料不能覆蓋
+# 改完存檔，下一次蒐集或週報就生效；週報「規格更新」會列出被更正的項目
+# - brand / model：照週報上的名稱（大小寫、空白、括號內料號都不影響比對）
+# - match（選填）：只更正特定螢幕選配，例如 {size_inch: 16, res_w: 2560}
+# - set：要設定的欄位與數值；設成 null 代表「確認是錯的，保持空白」
+#   常用欄位：panel_maker 面板廠、panel_model 面板型號、panel_tech 面板技術、refresh_hz 刷新率、
+#   sdr_nits 亮度、dci_p3_pct DCI-P3、surface 表面處理、touch 觸控（true/false）、response_ms 反應時間
+# - note：資訊來源說明（會顯示在報告的出處）
+corrections: []
+# 範例（把 corrections: [] 改成下面的格式）：
+# corrections:
+#   - brand: HP
+#     model: OMEN 16
+#     match: {res_w: 2560}
+#     set: {panel_maker: BOE, panel_model: NE160QDM-NZ1}
+#     note: 供應鏈確認 2026-10
+
 # 週報最後的「系統健康與資料查核」（全部由程式檢查，不花 AI 與 Tavily 額度）
 health:
   collect_weekdays: [0, 1, 2, 4, 6]   # 預期執行的日子（0=週一 … 6=週日；週二是規格補完），沒跑會提醒

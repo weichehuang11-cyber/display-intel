@@ -109,6 +109,13 @@ def cmd_collect(cfg: dict, args) -> int:
             except Exception as exc:
                 log.exception("規格補完失敗（不影響已完成的蒐集）")
                 stats["enrich"] = {"error": f"{type(exc).__name__}：{exc}"}
+        # 人工更正最後套用，確保蓋過本次新抓到的資料
+        from . import corrections
+        try:
+            stats["corrections"] = corrections.apply(db, cfg)
+        except Exception as exc:
+            log.exception("人工更正套用失敗（不影響已完成的蒐集）")
+            stats["corrections"] = {"error": f"{type(exc).__name__}：{exc}"}
         stats["llm_calls_total"] = llm.calls
         if llm.switched:
             stats["llm_switched"] = llm.switched
@@ -174,6 +181,11 @@ def cmd_report(cfg: dict, args) -> int:
         except Exception as exc:
             log.warning("AI 摘要不可用，改用規則摘要：%s", exc)
             llm = None
+        from . import corrections
+        try:
+            corrections.apply(db, cfg)  # 改了 config.yaml 的人工更正，這次週報就生效
+        except Exception:
+            log.exception("人工更正套用失敗（仍繼續產生報告）")
         ctx, html, xlsx, ids = build_report(db, cfg, llm)
         log.info("報告已產生：%s", ctx["subject"])
 

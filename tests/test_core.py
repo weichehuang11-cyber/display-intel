@@ -969,3 +969,39 @@ def test_field_level_sources(tmp_path):
     # 舊資料沒有欄位來源 → 沿用整筆來源；傳聞欄位在比較表加記號
     old = _rec("o1", 1, conf=Confidence.D, brand="X", model="Y", refresh_hz=240)
     assert old.source_of("refresh_hz").kind == "record" and compare_row(old)["marks"]["refresh"][0] == "傳"
+
+
+def test_manual_corrections(tmp_path):
+    from display_intel import corrections, health
+    from display_intel.db import DB
+    from display_intel.report import provenance
+    db = DB(tmp_path / "m.sqlite")
+    ev = lambda **kw: {k: str(v) for k, v in kw.items()}
+    for res in (2560, 1920):
+        verify.merge_panel(db, PanelSpec(brand="HP", model="OMEN 16 (16-k0000)", size_inch=16.1, res_w=res, res_h=res * 10 // 16,
+                                         refresh_hz=165, pwm_hz=240, evidence=ev(size_inch=16.1, res_w=res, refresh_hz=165, pwm_hz=240)),
+                           Confidence.C, art(url=f"https://m.com/{res}"), [])
+    cfg = {"corrections": [
+        {"brand": "hp", "model": "OMEN 16", "match": {"res_w": 2560}, "set": {"panel_maker": "boe", "pwm_hz": None, "refresh_hz": 240},
+         "note": "供應鏈確認"},
+        {"brand": "HP", "model": "不存在", "set": {"refresh_hz": 120}},
+        {"brand": "HP", "model": "OMEN 16", "set": {"no_such_field": 1, "refresh_hz": "abc"}},
+    ]}
+    st = corrections.apply(db, cfg)
+    assert st["changed"] == 1 and st["unmatched"] == ["HP 不存在"] and len(st["errors"]) == 2
+    rec = next(r for r in db.all_panels() if r.spec.res_w == 2560)
+    other = next(r for r in db.all_panels() if r.spec.res_w == 1920)
+    assert rec.spec.panel_maker == "BOE" and rec.spec.refresh_hz == 240 and rec.spec.pwm_hz is None
+    assert other.spec.refresh_hz == 165 and other.spec.panel_maker is None
+    assert rec.source_of("refresh_hz").label == "人工更正・供應鏈確認" and provenance(rec)[0]["label"] == "人工更正・供應鏈確認"
+    ups = [e for e in db.unreported_events() if e["payload"].get("tag") == "manual"]
+    assert len(ups) == 1 and ups[0]["payload"]["changes"]["refresh_hz"] == [165.0, 240.0]
+    # 重複套用不產生新事件；之後的新聞（即使是官方）也不能覆蓋或填回
+    assert corrections.apply(db, cfg)["changed"] == 0
+    verify.merge_panel(db, PanelSpec(brand="HP", model="OMEN 16 (16-k0000)", size_inch=16.1, res_w=2560, res_h=1600,
+                                     refresh_hz=165, pwm_hz=240, evidence=ev(refresh_hz=165, pwm_hz=240)),
+                       Confidence.A, art(url="https://hp.com/omen"), [])
+    rec = next(r for r in db.all_panels() if r.spec.res_w == 2560)
+    assert rec.spec.refresh_hz == 240 and rec.spec.pwm_hz is None
+    chk = health.corrections_check(db.all_panels(), cfg)
+    assert chk["level"] == "warn" and any("不存在" in n for n in chk["notes"])

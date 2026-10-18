@@ -319,12 +319,27 @@ def data_quality(records: list[PanelRecord], since: datetime, now: datetime,
     return checks, stats
 
 
+def corrections_check(records: list[PanelRecord], cfg: dict) -> dict | None:
+    from . import corrections
+    n = len(corrections.items(cfg))
+    if not n:
+        return None
+    miss, errs = corrections.unmatched(records, cfg)
+    applied = sum(1 for r in records for fs in r.field_sources.values() if fs.kind == "manual")
+    notes = [f"找不到機型：{m}（檢查品牌、機型名稱是否和週報上一樣）" for m in miss] + errs
+    return _check("人工更正", "warn" if notes else "ok",
+                  f"{n} 項更正，共 {applied} 個欄位以人工值為準" + (f"；{len(notes)} 項需要修正設定" if notes else ""), notes)
+
+
 def build(db: DB, cfg: dict, now: datetime, records: list[PanelRecord] | None = None, days: int = 7) -> dict:
     records = records if records is not None else db.all_panels()
     since = now - timedelta(days=days)
     ops = operations(db, cfg, now, days)
     quality, stats = data_quality(records, since.astimezone(timezone.utc), now,
                                   (cfg.get("health") or {}).get("not_duplicates"))
+    cc = corrections_check(records, cfg)
+    if cc:
+        quality.append(cc)
     worst = max([c["level"] for c in ops + quality] or ["ok"], key=LEVEL_RANK.get)
     n_warn = sum(c["level"] != "ok" for c in ops + quality)
     summary = {"ok": "全部正常", "warn": f"{n_warn} 項需要注意", "bad": f"{n_warn} 項異常，其中有需要處理的問題"}[worst]
