@@ -1124,14 +1124,16 @@ def test_numbers_must_appear_in_evidence():
     assert any("res_w=3840" in f for f in old.flags)
 
 
-def test_mobile_compact_layout():
-    from display_intel.report import comparison, group_by_model, panel_card, compact_chips, render_html
-    r = _rec("m1", 1, brand="HP", model="OMEN 17", size_inch=17, res_w=1920, res_h=1080, refresh_hz=144, surface="anti-glare")
-    chips = compact_chips(r)
-    assert chips == [("size", '17.3"*'), ("res", "1920×1080"), ("refresh", "144Hz"), ("surface", "AG")]  # 沒資料的不列
+def test_aligned_comparison_table():
+    from display_intel.report import comparison, group_by_model, panel_card, spec_cells, render_html, SPEC_COLS
+    r = _rec("m1", 1, brand="HP", model="OMEN 17", size_inch=17, res_w=1920, res_h=1080, refresh_hz=144, surface="anti-glare",
+             panel_tech="IPS LCD")
+    cells = {c["key"]: c["text"] for c in spec_cells(r)}
+    # 每欄固定一項規格；沒資料的欄位是空字串（表格顯示淡灰 –），位置不會因為缺資料而移動
+    assert [c["key"] for c in spec_cells(r)] == [k for k, *_ in SPEC_COLS]
+    assert cells["size"] == "17.3*" and cells["tech"] == "IPS" and cells["res"] == "1920×1080" and cells["refresh"] == "144"
+    assert cells["surface"] == "AG" and cells["sdr"] == "" and cells["p3"] == ""
     segs = comparison(group_by_model([panel_card(r), panel_card(_rec("m2", 1, brand="HP", model="X", size_inch=17.3, refresh_hz=240))]))
-    assert "refresh" in segs[0]["rows"][1]["best"] or "refresh" in segs[0]["rows"][0]["best"]
-    from jinja2 import Environment, FileSystemLoader
     from display_intel.report import TEMPLATES
     src = (TEMPLATES / "report.html.j2").read_text()
-    assert "@media only screen and (max-width:600px)" in src and "cmp_compact" in src and 'class="m-only"' in src
+    assert ".mh { display:none !important; }" in src and "cmp_name" in src and "cmp_compact" not in src

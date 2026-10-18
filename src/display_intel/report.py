@@ -58,7 +58,7 @@ PROV_SKIP = {"brand", "model", "product_type", "regions", "evidence", "res_h"}
 # 比較表欄位 → 規格欄位（用來標示出處記號）
 CMP_FIELDS = {"size": "size_inch", "tech": "panel_tech", "res": "res_w", "refresh": "refresh_hz", "response": "response_ms",
               "sdr": "sdr_nits", "hdr": "hdr_peak_nits", "p3": "dci_p3_pct", "surface": "surface", "maker": "panel_maker",
-              "touch": "touch"}
+              "touch": "touch", "srgb": "srgb_pct"}
 
 
 def source_mark(fs) -> str:
@@ -361,6 +361,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         ctx[k] = group_by_model(ctx[k])
     ctx["panel_known"] = sum(1 for c in ctx["new_panels"] if c["panel_known"])
     ctx["compare_new"] = comparison(ctx["new_panels"])
+    ctx["spec_cols"] = [{"key": k, "head": h, "unit": u, "mobile": m, "right": rt} for k, h, u, m, rt, _ in SPEC_COLS]
     # 詳細規格附錄：有亮點、資料多的排前面（手機版只顯示前 mobile_cards 款）
     ctx["appendix"] = sorted(ctx["new_panels"], key=lambda c: (not c.get("tags"), -c["score_pct"], c["brand"].lower()))
     ctx["mobile_cards"] = (cfg.get("report") or {}).get("mobile_cards", 8)
@@ -636,7 +637,7 @@ SEGMENT_ORDER = ["13 吋以下", "14 吋級", "15.6 吋級", "16 吋級", "17–
 BEST_RULES = {
     "refresh": (lambda s, r: s.refresh_hz, max), "response": (lambda s, r: s.response_ms, min),
     "sdr": (lambda s, r: s.sdr_nits, max), "hdr": (lambda s, r: s.hdr_peak_nits, max),
-    "p3": (lambda s, r: s.dci_p3_pct, max), "ppi": (lambda s, r: r.ppi, max),
+    "p3": (lambda s, r: s.dci_p3_pct, max), "srgb": (lambda s, r: s.srgb_pct, max), "ppi": (lambda s, r: r.ppi, max),
 }
 
 
@@ -667,48 +668,55 @@ def compare_row(rec: PanelRecord, label: str = "", option: str = "", extra: dict
         "touch": "觸控" if s.touch else "", "price": price_text(s),
         "score": f"{k}/{t}", "score_pct": round(k / t * 100),
         "best": set(), "source_url": rec.source_url,
-        "chips": compact_chips(rec),
+        "cells": spec_cells(rec),
         "marks": {k: (m, rec.source_of(f).label) for k, f in CMP_FIELDS.items()
                   if getattr(s, f) not in (None, [], "") and (m := source_mark(rec.source_of(f)))},
         **(extra or {}),
     }
 
 
-def compact_chips(rec: PanelRecord) -> list[tuple[str, str]]:
-    """手機版比較：只列有資料的規格，一款兩三行。回傳 [(欄位代碼, 文字)]，代碼用來標最佳值與出處記號。"""
+# ---------- 比較表固定欄位（一欄一項規格，單位在表頭，電腦版與手機版共用）----------
+TECH_SHORT = {"IPS LCD": "IPS", "VA LCD": "VA", "Mini LED LCD": "Mini LED", "OLED": "OLED", "Tandem OLED": "Tandem"}
+
+
+def _num(v) -> str:
+    return f"{v:g}" if v else ""
+
+
+def _size_cell(rec: PanelRecord) -> str:
     s = rec.spec
-    out = []
-    size = (f'{rec.size_corrected:g}"*' if rec.size_corrected else f'{s.size_inch:g}"') if s.size_inch \
-        else (f'{rec.size_inferred:g}"*' if rec.size_inferred else "")
-    if size:
-        out.append(("size", size))
-    if s.panel_tech:
-        out.append(("tech", s.panel_tech))
+    if s.size_inch:
+        return f"{rec.size_corrected:g}*" if rec.size_corrected else f"{s.size_inch:g}"
+    return f"{rec.size_inferred:g}*" if rec.size_inferred else ""
+
+
+def _res_cell(rec: PanelRecord) -> str:
+    s = rec.spec
     if s.res_w and s.res_h:
-        out.append(("res", f"{s.res_w}×{s.res_h}"))
-    elif rec.res_inferred:
-        out.append(("res", f"{rec.res_inferred}*"))
-    if s.refresh_hz:
-        out.append(("refresh", f"{s.refresh_hz:g}Hz"))
-    if s.response_ms:
-        out.append(("response", f"{s.response_ms:g}ms"))
-    if s.sdr_nits:
-        out.append(("sdr", f"{s.sdr_nits:g} nits"))
-    if s.hdr_peak_nits:
-        out.append(("hdr", f"HDR {s.hdr_peak_nits:g}"))
-    if s.dci_p3_pct:
-        out.append(("p3", f"P3 {s.dci_p3_pct:g}%"))
-    elif s.srgb_pct:
-        out.append(("", f"sRGB {s.srgb_pct:g}%"))
-    code = derive.surface_code(s.surface)
-    if code or s.surface:
-        out.append(("surface", code or (s.surface[:14] + ("…" if len(s.surface) > 14 else ""))))
-    if s.touch:
-        out.append(("touch", "觸控"))
-    maker = rec.maker
-    if maker:
-        out.append(("maker", (f"{maker}*" if rec.panel_maker_inferred else maker) + (f" {s.panel_model}" if s.panel_model else "")))
-    return out
+        return f"{s.res_w}×{s.res_h}"
+    return f"{rec.res_inferred}*" if rec.res_inferred else ""
+
+
+# (欄位代碼, 表頭, 單位, 手機顯示, 數值靠右, 取值)；欄位代碼同時用於最佳值（BEST_RULES）與出處記號（CMP_FIELDS）
+SPEC_COLS = [
+    ("size", "尺寸", "吋", True, True, _size_cell),
+    ("tech", "面板", "", True, False, lambda r: TECH_SHORT.get(r.spec.panel_tech or "", r.spec.panel_tech or "")),
+    ("res", "解析度", "", True, True, _res_cell),
+    ("refresh", "刷新", "Hz", True, True, lambda r: _num(r.spec.refresh_hz)),
+    ("response", "反應", "ms", False, True, lambda r: _num(r.spec.response_ms)),
+    ("sdr", "SDR", "nits", True, True, lambda r: _num(r.spec.sdr_nits)),
+    ("hdr", "HDR", "nits", False, True, lambda r: _num(r.spec.hdr_peak_nits)),
+    ("p3", "DCI-P3", "%", True, True, lambda r: _num(r.spec.dci_p3_pct)),
+    ("srgb", "sRGB", "%", False, True, lambda r: _num(r.spec.srgb_pct)),
+    ("surface", "表面", "", True, False, lambda r: derive.surface_code(r.spec.surface)
+     or ((r.spec.surface[:10] + "…") if r.spec.surface and len(r.spec.surface) > 10 else (r.spec.surface or ""))),
+    ("touch", "觸控", "", False, False, lambda r: "✓" if r.spec.touch else ("✗" if r.spec.touch is False else "")),
+    ("maker", "面板廠", "", False, False, lambda r: (f"{r.maker}*" if r.panel_maker_inferred else r.maker) if r.maker else ""),
+]
+
+
+def spec_cells(rec: PanelRecord) -> list[dict]:
+    return [{"key": k, "text": get(rec), "mobile": mob, "right": right} for k, _, _, mob, right, get in SPEC_COLS]
 
 
 def mark_best(rows: list[dict]):

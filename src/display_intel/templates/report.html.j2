@@ -40,59 +40,38 @@
 {%- endmacro -%}
 {%- macro mk(r, key) -%}{% set m = (r.marks or {}).get(key) %}{% if m %}<sup title="{{ m[1] }}" style="color:#b4580a;font-size:9px;margin-left:1px;">{{ m[0] }}</sup>{% endif %}{%- endmacro -%}
 {%- macro best(r, key, text) -%}{% if key in r.best %}<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">{{ text }}</b>{% else %}{{ text }}{% endif %}{{ mk(r, key) }}{%- endmacro -%}
+{#- 規格比較表：一欄一項規格、單位在表頭、數字靠右；機型名稱獨立一列，下面每個螢幕選配一列。
+    手機（600px 以下）隱藏 class="mh" 的次要欄位，其餘欄位位置與電腦版相同。 -#}
 {%- macro cmp_head() -%}
-<tr style="background:#1f3a5f;color:#fff;text-align:left;font-size:11px;">
-  <th style="padding:6px;">機型</th><th style="padding:6px;">螢幕</th><th style="padding:6px;">解析度</th>
-  <th style="padding:6px;">刷新／反應</th><th style="padding:6px;">亮度 nits<br><span style="font-weight:normal;">SDR／HDR</span></th>
-  <th style="padding:6px;">色域</th><th style="padding:6px;">表面</th><th style="padding:6px;">面板廠</th><th style="padding:6px;">規格</th>
+<tr style="background:#1f3a5f;color:#fff;font-size:11px;line-height:1.25;">
+  {% for c in spec_cols %}<th {% if not c.mobile %}class="mh" {% endif %}style="padding:6px 4px;font-weight:600;text-align:{{ 'right' if c.right else 'left' }};white-space:nowrap;">{{ c.head }}{% if c.unit %}<br><span style="font-weight:normal;color:#c7d2e0;">{{ c.unit }}</span>{% else %}<br>&nbsp;{% endif %}</th>{% endfor %}
 </tr>
 {%- endmacro -%}
-{%- macro cmp_row(r, stripe) -%}
-<tr style="border-top:1px solid #e3e6ea;vertical-align:top;font-size:12px;{% if stripe %}background:#f8fafc;{% endif %}">
-  <td style="padding:6px;min-width:96px;">{% if r.label %}<b>{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1a1a1a;text-decoration:none;">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</b>{% endif %}
-    {% if r.option %}<div style="font-size:10.5px;color:#999;">{{ r.option }}</div>{% endif %}
-    {% if r.price %}<div style="font-size:10.5px;color:#52514e;">{{ r.price }}</div>{% endif %}
-    {% if r.updated %}<div style="font-size:10.5px;color:#1e7d4f;">● {{ period_label }}有更新</div>{% endif %}
-    {% for tg in r.tags or [] %}<div style="font-size:10.5px;color:#a16207;">★ {{ tg }}</div>{% endfor %}</td>
-  <td style="padding:6px;white-space:nowrap;">{{ r.size }}{{ mk(r, "size") }}<div style="font-size:10.5px;color:#666;">{{ r.tech }}{{ mk(r, "tech") }}</div></td>
-  <td style="padding:6px;white-space:nowrap;">{{ r.res }}{{ mk(r, "res") }}<div style="font-size:10.5px;color:#999;">{{ r.aspect }}</div></td>
-  <td style="padding:6px;white-space:nowrap;">{{ best(r, "refresh", r.refresh) }}{% if r.response %}<div style="font-size:10.5px;">{{ best(r, "response", r.response) }}</div>{% endif %}</td>
-  <td style="padding:6px;white-space:nowrap;">{{ best(r, "sdr", r.sdr) }}{% if r.hdr %}<div style="font-size:10.5px;">HDR {{ best(r, "hdr", r.hdr) }}</div>{% endif %}</td>
-  <td style="padding:6px;white-space:nowrap;">{% for g in r.gamut %}<div>{% if loop.first and g.startswith("P3") %}{{ best(r, "p3", g) }}{% else %}{{ g }}{% endif %}</div>{% endfor %}</td>
-  <td style="padding:6px;white-space:nowrap;">{{ r.surface }}{{ mk(r, "surface") }}{% if r.touch %}<div style="font-size:10.5px;color:#666;">{{ r.touch }}{{ mk(r, "touch") }}</div>{% endif %}</td>
-  <td style="padding:6px;">{{ r.maker }}{{ mk(r, "maker") }}{% if r.panel_model %}<div style="font-size:10.5px;color:#999;">{{ r.panel_model }}</div>{% endif %}</td>
-  <td style="padding:6px;white-space:nowrap;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">{{ r.score }}</td>
-</tr>
-{%- endmacro -%}
-{#- 手機版精簡比較：一款兩三行，只列有資料的規格 -#}
-{%- macro cmp_compact(rows) -%}
-{% for r in rows %}
-<div style="padding:8px 4px;border-top:1px solid #e3e6ea;{% if r.stripe %}background:#f8fafc;{% else %}background:#fff;{% endif %}{% if not r.label %}padding-left:16px;{% endif %}">
-  <div style="font-size:13.5px;line-height:1.45;">
-    {% if r.label %}<b>{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1a1a1a;text-decoration:none;">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</b>{% if r.option %} <span style="font-size:11px;color:#999;">{{ r.option }}</span>{% endif %}
-    {% else %}<span style="font-size:12px;color:#777;">↳ {{ r.option }}</span>{% endif %}
-    <span style="font-size:11px;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">　{{ r.score }}</span>
-    {% if r.updated %}<span style="font-size:11px;color:#1e7d4f;">　● 有更新</span>{% endif %}
+{%- macro cmp_name(r) -%}
+<tr class="nm" style="background:#eef2f7;border-top:1px solid #cfd6df;">
+  <td colspan="{{ spec_cols|length }}" style="padding:6px 6px 4px;font-size:13px;line-height:1.4;">
+    <b>{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1a1a1a;text-decoration:none;">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</b>
+    <span style="font-size:11px;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">　規格 {{ r.score }}</span>
+    {% if r.updated %}<span style="font-size:11px;color:#1e7d4f;">　● {{ period_label }}有更新</span>{% endif %}
     {% for tg in r.tags or [] %}<span style="font-size:11px;color:#a16207;">　★ {{ tg }}</span>{% endfor %}
-  </div>
-  <div style="font-size:12.5px;line-height:1.75;color:#333;">{% if r.chips %}{% for k, txt in r.chips %}{% if k and k in r.best %}<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">{{ txt }}</b>{% else %}{{ txt }}{% endif %}{{ mk(r, k) }}{% if not loop.last %}<span style="color:#c4c4c4;"> · </span>{% endif %}{% endfor %}{% else %}<span style="color:#aaa;">規格待補</span>{% endif %}</div>
-  {% if r.price %}<div style="font-size:11.5px;color:#52514e;">{{ r.price }}</div>{% endif %}
-</div>
-{% endfor %}
+    {% if r.price %}<span style="font-size:11px;color:#52514e;">　{{ r.price }}</span>{% endif %}
+  </td>
+</tr>
 {%- endmacro -%}
-{#- 比較區塊：電腦版表格＋手機版精簡列表（以螢幕寬度切換） -#}
-{%- macro cmp_block(rows) -%}
-<div class="d-only">{{ cmp_table(rows) }}</div>
-<div class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;"><div style="border:1px solid #d5dae1;border-top:0;">{{ cmp_compact(rows) }}</div></div>
+{%- macro cmp_row(r) -%}
+<tr style="background:#fff;border-top:1px solid #edf0f3;">
+  {% for c in r.cells %}<td {% if not c.mobile %}class="mh" {% endif %}style="padding:5px 4px;font-size:12px;white-space:nowrap;text-align:{{ 'right' if c.right else 'left' }};font-variant-numeric:tabular-nums;">{% if c.text %}{{ best(r, c.key, c.text) }}{% else %}<span style="color:#c9ced6;">–</span>{% endif %}</td>{% endfor %}
+</tr>
 {%- endmacro -%}
 {%- macro cmp_table(rows) -%}
 <div style="overflow-x:auto;">
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;background:#fff;border:1px solid #d5dae1;">
+<table class="ct" role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;background:#fff;border:1px solid #d5dae1;">
   {{ cmp_head() }}
-  {% for r in rows %}{{ cmp_row(r, r.stripe) }}{% endfor %}
+  {% for r in rows %}{% if r.label %}{{ cmp_name(r) }}{% endif %}{{ cmp_row(r) }}{% endfor %}
 </table>
 </div>
 {%- endmacro -%}
+{%- macro cmp_block(rows) -%}{{ cmp_table(rows) }}{%- endmacro -%}
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ subject }}</title>
 <style>
@@ -101,6 +80,9 @@
   .d-only { display:none !important; }
   .m-only { display:block !important; max-height:none !important; overflow:visible !important; }
   .wrap { padding:14px 10px !important; }
+  .mh { display:none !important; }
+  .ct td, .ct th { padding:4px 3px !important; font-size:11px !important; }
+  .ct .nm td { font-size:12.5px !important; }
 }
 </style></head>
 <body style="margin:0;padding:0;background:#f2f4f7;font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;color:#222;">
