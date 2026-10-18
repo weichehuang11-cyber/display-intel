@@ -933,3 +933,39 @@ def test_llm_switches_model_when_quota_exhausted(monkeypatch):
     m.model, m.fallbacks = "model-a", []
     with pytest.raises(llm_mod.BudgetExceeded):
         m.complete_json("s", "u")
+
+
+def test_field_level_sources(tmp_path):
+    from display_intel.db import DB
+    from display_intel.report import compare_row, provenance
+    db = DB(tmp_path / "f.sqlite")
+    ev = lambda **kw: {k: str(v) for k, v in kw.items()}
+    # 官方發表：刷新率 120（A）
+    verify.merge_panel(db, PanelSpec(brand="HP", model="Z", size_inch=14, refresh_hz=120, evidence=ev(size_inch=14, refresh_hz=120)),
+                       Confidence.A, art(url="https://hp.com/z"), [])
+    rec = db.all_panels()[0]
+    assert rec.field_sources["refresh_hz"].conf == Confidence.A and "brand" not in rec.field_sources
+    # 媒體補上反應時間 5ms（C）
+    verify.merge_panel(db, PanelSpec(brand="HP", model="Z", size_inch=14, response_ms=5, evidence=ev(response_ms=5)),
+                       Confidence.C, art(url="https://media.com/a"), [])
+    # 評測（B）：反應時間 3ms 可蓋過媒體；刷新率 144 不能蓋過官方
+    verify.merge_panel(db, PanelSpec(brand="HP", model="Z", size_inch=14, response_ms=3, refresh_hz=144,
+                                     evidence=ev(response_ms=3, refresh_hz=144)), Confidence.B, art(url="https://review.net/z"), [])
+    rec = db.all_panels()[0]
+    assert rec.spec.response_ms == 3 and rec.source_of("response_ms").domain == "review.net"
+    assert rec.spec.refresh_hz == 120 and rec.source_of("refresh_hz").domain == "hp.com"
+    # 同等級不同數值 → 標記兩個網站
+    verify.merge_panel(db, PanelSpec(brand="HP", model="Z", size_inch=14, response_ms=4, evidence=ev(response_ms=4)),
+                       Confidence.B, art(url="https://other.net/z"), [])
+    rec = db.all_panels()[0]
+    assert any("review.net vs other.net" in f for f in rec.flags)
+    # 更可信的來源證實同一數值 → 出處升級，原來源變佐證
+    verify.merge_panel(db, PanelSpec(brand="HP", model="Z", size_inch=14, response_ms=3, evidence=ev(response_ms=3)),
+                       Confidence.A, art(url="https://hp.com/spec"), [])
+    rec = db.all_panels()[0]
+    assert rec.source_of("response_ms").conf == Confidence.A and rec.corroborated["response_ms"] == ["review.net"]
+    prov = provenance(rec)
+    assert prov[0]["label"] == "官方・hp.com" and "刷新率" in prov[0]["fields"] and "反應時間" in prov[0]["fields"]
+    # 舊資料沒有欄位來源 → 沿用整筆來源；傳聞欄位在比較表加記號
+    old = _rec("o1", 1, conf=Confidence.D, brand="X", model="Y", refresh_hz=240)
+    assert old.source_of("refresh_hz").kind == "record" and compare_row(old)["marks"]["refresh"][0] == "傳"

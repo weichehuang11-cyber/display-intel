@@ -36,7 +36,7 @@ demo.py     虛構範例資料，不需金鑰即可產生報告
 
 1. **防幻覺**：每個規格欄位都必須有逐字出自文章的 evidence，否則 `derive.enforce_evidence` 會刪除。不要放寬這條規則。
 2. **衍生規格由程式計算**，不從文章抄。
-3. **可信度**：A 官方、B 實測、C 媒體／彙整、D 傳聞、E 待確認（不進報告）。低可信度來源不能覆蓋高可信度數值；D 被 C 以上證實時產生 `rumor_confirmed` 事件。
+3. **可信度（欄位層級）**：A 官方、B 實測、C 媒體／彙整、D 傳聞、E 待確認（不進報告）。每個欄位記在 `PanelRecord.field_sources`（`FieldSource`：url、conf、kind=article/panel_datasheet/manual/record），讀取一律用 `rec.source_of(f)`（舊資料沿用整筆來源）。新數值只有比「該欄位目前來源」更可信才覆蓋；同等級不同值記 `來源數值不一致` flag（含兩個網域）；更可信來源證實同值時出處升級、原來源改列 `corroborated`；`kind="manual"` 永不被覆蓋。D 被 C 以上證實時產生 `rumor_confirmed` 事件。
 4. **單一來源或單批失敗不中斷流程**；額度用完（`BudgetExceeded`）時停止萃取，用已完成的部分出報告。
 5. **排定時間一定要寄出**：報告失敗時寄失敗通知給 SMTP_USER。
 6. 事件寄出成功後才 `mark_reported`；dry-run 不標記。
@@ -55,7 +55,6 @@ python -m display_intel demo # 產生 output/report-日期.html
 ## 已知限制與待辦
 
 - 同款機型合併：`verify.compatible` 以品牌＋正規化機型＋相容的尺寸/解析度/面板技術判斷，每次 ingest 後執行 `consolidate`
-- 可信度目前是「整筆紀錄」層級，設計文件要求「欄位層級」（每個欄位各自記來源與等級）
 - Google 新聞連結是轉址頁，抓不到全文，只有摘要
 - 社群只有 Reddit RSS；X、微博需付費 API 或第三方服務
 - 面板廠世代線尚未有獨立的能力檔案資料表（目前以 fab 事件記錄），每月對照表未實作

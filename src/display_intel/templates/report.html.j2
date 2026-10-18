@@ -29,6 +29,7 @@
     <div style="font-size:14px;line-height:1.6;{% if not o.panel_known %}color:#999;{% endif %}">🏭 {{ o.panel }}</div>
     {% if o.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ o.extras }}</div>{% endif %}
     {% if o.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ o.derived }}</div>{% endif %}
+    {% if o.provenance|length > 1 %}<div style="font-size:11.5px;line-height:1.6;color:#888;margin-top:2px;">出處｜{% for p in o.provenance %}{% if p.url %}<a href="{{ p.url }}" style="color:#1f5fa8;text-decoration:none;">{{ p.label }}</a>{% else %}{{ p.label }}{% endif %}：{{ p.fields }}{% if not loop.last %}；{% endif %}{% endfor %}</div>{% endif %}
     {% if o.platform %}<div style="font-size:12px;line-height:1.6;color:#999;">平台：{{ o.platform }}</div>{% endif %}
     {% if show_changes and o.changes %}<div style="font-size:13px;line-height:1.6;color:#1e7d4f;margin-top:4px;">更新：{{ o.changes }}</div>{% endif %}
   </div>
@@ -36,7 +37,8 @@
   <div style="font-size:12px;margin-top:6px;">{% for o in c.sources %}{{ src(o) }}{% if not loop.last %}　{% endif %}{% endfor %}</div>
 </div>
 {%- endmacro -%}
-{%- macro best(r, key, text) -%}{% if key in r.best %}<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">{{ text }}</b>{% else %}{{ text }}{% endif %}{%- endmacro -%}
+{%- macro mk(r, key) -%}{% set m = (r.marks or {}).get(key) %}{% if m %}<sup title="{{ m[1] }}" style="color:#b4580a;font-size:9px;margin-left:1px;">{{ m[0] }}</sup>{% endif %}{%- endmacro -%}
+{%- macro best(r, key, text) -%}{% if key in r.best %}<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">{{ text }}</b>{% else %}{{ text }}{% endif %}{{ mk(r, key) }}{%- endmacro -%}
 {%- macro cmp_head() -%}
 <tr style="background:#1f3a5f;color:#fff;text-align:left;font-size:11px;">
   <th style="padding:6px;">機型</th><th style="padding:6px;">螢幕</th><th style="padding:6px;">解析度</th>
@@ -50,13 +52,13 @@
     {% if r.option %}<div style="font-size:10.5px;color:#999;">{{ r.option }}</div>{% endif %}
     {% if r.updated %}<div style="font-size:10.5px;color:#1e7d4f;">● {{ period_label }}有更新</div>{% endif %}
     {% for tg in r.tags or [] %}<div style="font-size:10.5px;color:#a16207;">★ {{ tg }}</div>{% endfor %}</td>
-  <td style="padding:6px;white-space:nowrap;">{{ r.size }}<div style="font-size:10.5px;color:#666;">{{ r.tech }}</div></td>
-  <td style="padding:6px;white-space:nowrap;">{{ r.res }}<div style="font-size:10.5px;color:#999;">{{ r.aspect }}</div></td>
+  <td style="padding:6px;white-space:nowrap;">{{ r.size }}{{ mk(r, "size") }}<div style="font-size:10.5px;color:#666;">{{ r.tech }}{{ mk(r, "tech") }}</div></td>
+  <td style="padding:6px;white-space:nowrap;">{{ r.res }}{{ mk(r, "res") }}<div style="font-size:10.5px;color:#999;">{{ r.aspect }}</div></td>
   <td style="padding:6px;white-space:nowrap;">{{ best(r, "refresh", r.refresh) }}{% if r.response %}<div style="font-size:10.5px;">{{ best(r, "response", r.response) }}</div>{% endif %}</td>
   <td style="padding:6px;white-space:nowrap;">{{ best(r, "sdr", r.sdr) }}{% if r.hdr %}<div style="font-size:10.5px;">HDR {{ best(r, "hdr", r.hdr) }}</div>{% endif %}</td>
   <td style="padding:6px;white-space:nowrap;">{% for g in r.gamut %}<div>{% if loop.first and g.startswith("P3") %}{{ best(r, "p3", g) }}{% else %}{{ g }}{% endif %}</div>{% endfor %}</td>
-  <td style="padding:6px;white-space:nowrap;">{{ r.surface }}{% if r.touch %}<div style="font-size:10.5px;color:#666;">{{ r.touch }}</div>{% endif %}</td>
-  <td style="padding:6px;">{{ r.maker }}{% if r.panel_model %}<div style="font-size:10.5px;color:#999;">{{ r.panel_model }}</div>{% endif %}</td>
+  <td style="padding:6px;white-space:nowrap;">{{ r.surface }}{{ mk(r, "surface") }}{% if r.touch %}<div style="font-size:10.5px;color:#666;">{{ r.touch }}{{ mk(r, "touch") }}</div>{% endif %}</td>
+  <td style="padding:6px;">{{ r.maker }}{{ mk(r, "maker") }}{% if r.panel_model %}<div style="font-size:10.5px;color:#999;">{{ r.panel_model }}</div>{% endif %}</td>
   <td style="padding:6px;white-space:nowrap;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">{{ r.score }}</td>
 </tr>
 {%- endmacro -%}
@@ -106,7 +108,7 @@
 
   {% if compare_new %}
   {{ h2("新機規格比較（" ~ new_panels|length ~ " 款）") }}
-  <div style="font-size:11px;color:#888;margin:-4px 0 8px;">依尺寸分組；<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">綠底</b> 為組內最佳值；* 表示由面板型號推算；規格＝13 項重點規格已知幾項。點機型名稱可看來源。</div>
+  <div style="font-size:11px;color:#888;margin:-4px 0 8px;">依尺寸分組；<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">綠底</b> 為組內最佳值；* 表示由面板型號推算；小字 <span style="color:#b4580a;">傳</span>＝傳聞、<span style="color:#b4580a;">面</span>＝面板原廠規格、<span style="color:#b4580a;">✎</span>＝人工更正；規格＝13 項重點規格已知幾項。點機型名稱可看來源。</div>
   {% for seg in compare_new %}
   <div style="font-size:13px;font-weight:bold;color:#1f3a5f;margin:12px 0 4px;">{{ seg.name }}（{{ seg.rows|selectattr("label")|list|length }} 款）</div>
   {{ cmp_table(seg.rows) }}

@@ -27,7 +27,7 @@ from .config import env
 from .db import DB, utcnow
 from .extract import extract_all
 from .llm import LLM, BudgetExceeded
-from .schema import Confidence, PanelRecord, PanelSpec, RawArticle
+from .schema import Confidence, FieldSource, PanelRecord, PanelSpec, RawArticle
 
 log = logging.getLogger(__name__)
 
@@ -206,6 +206,8 @@ def apply_panel_specs(db: DB, rec: PanelRecord, values: dict, url: str) -> dict:
         if data.get(f) in (None, "", []):
             data[f] = canonical_maker(v) if f == "panel_maker" else v
             changes[f] = [None, data[f]]
+            rec.field_sources[f] = FieldSource(url=url, source="面板原廠規格", conf=Confidence.C, at=utcnow(),
+                                               kind="panel_datasheet")
     if changes:
         rec.spec = PanelSpec(**data)
         rec.panel_spec_fields = sorted(set(rec.panel_spec_fields) | set(changes))

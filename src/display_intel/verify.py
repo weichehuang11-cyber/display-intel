@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 from . import derive
 from .db import DB, utcnow
 from .panel_decode import canonical_maker, decode
-from .schema import (SOURCE_TYPE_CONFIDENCE, Confidence, Extraction, PanelEvent,
+from .schema import (SOURCE_TYPE_CONFIDENCE, Confidence, Extraction, FieldSource, PanelEvent,
                      PanelRecord, PanelSpec, RawArticle)
 
 SPEC_FIELDS = [f for f in PanelSpec.model_fields if f != "evidence"]
@@ -132,10 +132,13 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
     key = panel_key(spec)
     now = utcnow()
     existing = find_existing(db, spec)
+    here = FieldSource(url=article.url, source=article.source, conf=conf, at=now)
     if existing is None:
+        filled = {f: here for f in SPEC_FIELDS if f not in ("brand", "model")
+                  and getattr(spec, f) not in (None, [], "")}
         rec = _derived(PanelRecord(key=key, spec=spec, confidence=conf, source_url=article.url,
                                    source_name=article.source, first_seen=now, last_updated=now, flags=flags,
-                                   announced=article.published or now))
+                                   announced=article.published or now, field_sources=filled))
         db.put_panel(rec)
         return PanelEvent(kind="new", record=rec)
 
@@ -150,22 +153,44 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
         nv, ov = new.get(f), old.get(f)
         if nv in (None, [], ""):
             continue
+        identity = f in ("brand", "model")
+        src = existing.source_of(f)
         if ov in (None, [], ""):
             old[f] = nv
             changes[f] = [None, nv]
+            if not identity:
+                existing.field_sources[f] = here
         elif nv == ov:
+            if identity:
+                continue
             # 另一個獨立網站寫出相同數值 → 記為佐證（同網域不算）
-            dom = _domain(article.url)
-            if f not in ("brand", "model") and dom and dom != _domain(existing.source_url) and conf.rank >= Confidence.C.rank:
+            dom, sdom = _domain(article.url), src.domain
+            if dom and dom != sdom and conf.rank >= Confidence.C.rank:
                 seen = existing.corroborated.setdefault(f, [])
                 if dom not in seen and len(seen) < 5:
                     seen.append(dom)
-        elif nv != ov:
-            if conf.rank > existing.confidence.rank:
+            # 更可信的來源證實同一數值 → 欄位出處升級（原來源改列佐證）
+            if conf.rank > src.conf.rank and src.kind != "manual":
+                existing.field_sources[f] = here
+                seen = existing.corroborated.setdefault(f, [])
+                if dom in seen:
+                    seen.remove(dom)
+                if sdom and sdom not in seen and sdom != dom:
+                    seen.append(sdom)
+        else:
+            if src.kind == "manual":
+                continue  # 人工更正永遠優先
+            # 欄位層級比較：只有比「這個欄位目前來源」更可信才覆蓋
+            frank = src.conf.rank if not identity else existing.confidence.rank
+            if conf.rank > frank:
                 old[f] = nv
                 changes[f] = [ov, nv]
-            elif conf.rank == existing.confidence.rank:
-                existing.flags.append(f"來源數值不一致：{f}（{ov} vs {nv}，{article.source}）")
+                if not identity:
+                    existing.field_sources[f] = here
+                    existing.corroborated.pop(f, None)
+            elif conf.rank == frank:
+                existing.flags.append(f"來源數值不一致：{f}（{ov} vs {nv}，"
+                                      f"{src.domain or src.source} vs {_domain(article.url) or article.source}）")
     old["evidence"] = {**existing.spec.evidence, **{k: v for k, v in spec.evidence.items() if k in changes}}
 
     rumor_confirmed = existing.confidence == Confidence.D and conf.rank >= Confidence.C.rank
@@ -199,6 +224,12 @@ def consolidate(db: DB) -> int:
             if data.get(f) in (None, [], "") and getattr(r.spec, f) not in (None, [], ""):
                 data[f] = getattr(r.spec, f)
         data["evidence"] = {**r.spec.evidence, **target.spec.evidence}
+        for f in SPEC_FIELDS:
+            if f not in target.field_sources and getattr(target.spec, f) in (None, [], "") and data.get(f) not in (None, [], ""):
+                target.field_sources[f] = r.source_of(f)
+        for f, doms in r.corroborated.items():
+            seen = target.corroborated.setdefault(f, [])
+            seen += [d for d in doms if d not in seen][:max(0, 5 - len(seen))]
         target.spec = PanelSpec(**data)
         target.first_seen = min(target.first_seen, r.first_seen)
         target.flags = list(dict.fromkeys(target.flags + r.flags))[-20:]

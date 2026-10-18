@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -38,6 +39,41 @@ FIELD_LABELS = {
     "cpu_platform": "處理器", "gpu": "顯示卡", "gpu_switching": "顯示切換", "platform_certifications": "平台認證",
     "display_power_tech": "平台顯示節能",
 }
+# ---------- 欄位出處 ----------
+PROV_SKIP = {"brand", "model", "product_type", "regions", "evidence", "res_h"}
+# 比較表欄位 → 規格欄位（用來標示出處記號）
+CMP_FIELDS = {"size": "size_inch", "tech": "panel_tech", "res": "res_w", "refresh": "refresh_hz", "response": "response_ms",
+              "sdr": "sdr_nits", "hdr": "hdr_peak_nits", "p3": "dci_p3_pct", "surface": "surface", "maker": "panel_maker",
+              "touch": "touch"}
+
+
+def source_mark(fs) -> str:
+    """比較表上的小記號：只標「非一般來源」，避免表格太擠。"""
+    if fs.kind == "manual":
+        return "✎"
+    if fs.kind == "panel_datasheet":
+        return "面"
+    if fs.conf.rank <= Confidence.D.rank:
+        return "傳"
+    return ""
+
+
+def provenance(rec: PanelRecord) -> list[dict]:
+    """依來源分組列出每個網站提供了哪些欄位（可信度高的在前）。"""
+    groups: dict[str, dict] = {}
+    for f, v in rec.spec.model_dump().items():
+        if f in PROV_SKIP or v in (None, [], ""):
+            continue
+        fs = rec.source_of(f)
+        g = groups.setdefault(fs.label, {"label": fs.label, "url": fs.url, "rank": fs.conf.rank + (9 if fs.kind == "manual" else 0),
+                                                   "fields": []})
+        g["fields"].append(FIELD_LABELS.get(f, f).replace("水平解析度", "解析度"))
+    out = sorted(groups.values(), key=lambda g: -g["rank"])
+    for g in out:
+        g["fields"] = "、".join(g["fields"])
+    return out
+
+
 VENDOR_ORDER = ["Intel", "NVIDIA", "AMD", "Qualcomm"]
 FAB_STATUS = {"planned": "規劃", "construction": "建廠", "equipment": "設備進駐", "trial": "試產",
               "mass_production": "量產", "shutdown": "停產", "other": "動態"}
@@ -127,7 +163,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         "screen": screen, "bright": bright, "gamut": gamut, "surface": surface, "touch": touch,
         "optics": optics, "structure": structure, "mechanics": mechanics, "interface": interface,
         "platform": ihv.platform_text(s), "ihv": ihv.evaluate(s), "panel": panel or "面板來源待確認", "panel_known": bool(panel),
-        "extras": extras, "derived": derived, "tags": tags or [],
+        "extras": extras, "derived": derived, "tags": tags or [], "provenance": provenance(rec),
         "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
         "source_name": rec.source_name, "source_url": rec.source_url, "changes": change_text,
         "spec": s.model_dump(), "record": rec.model_dump(mode="json"),
@@ -480,6 +516,24 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
         sheet(ws5, ["技術", "說明", f"{ctx.get('period_label', '本期')}款數", f"{ctx.get('period_label', '本期')}提及率", "前 30 天提及率"],
               [[r["feature"], r["desc"], r["count"], r["share"], r["base_share"]] for r in ctx["mentions"]])
 
+    wsf = wb.create_sheet("欄位來源")
+    rows_f = []
+    for rec in db.all_panels():
+        if rec.confidence.rank < Confidence.C.rank:
+            continue
+        for f, v in rec.spec.model_dump().items():
+            if f in PROV_SKIP or v in (None, [], ""):
+                continue
+            fs = rec.source_of(f)
+            val = f"{rec.spec.res_w}×{rec.spec.res_h}" if f == "res_w" else _fmt(v)
+            rows_f.append([rec.spec.brand, rec.spec.model, rec.key, FIELD_LABELS.get(f, f).replace("水平解析度", "解析度"), val,
+                           fs.label.split("・")[0], fs.domain or fs.source, str(rec.spec.evidence.get(f) or "")[:200],
+                           "、".join(rec.corroborated.get(f, [])), fs.at.strftime("%Y-%m-%d") if fs.at else "", fs.url])
+    sheet(wsf, ["品牌", "機型", "紀錄代碼", "欄位", "數值", "可信度／類型", "來源網站", "原文", "佐證網站", "取得日期", "網址"], rows_f)
+    wsf.auto_filter.ref = wsf.dimensions
+    for col, w in (("C", 18), ("H", 50), ("K", 40)):
+        wsf.column_dimensions[col].width = w
+
     hc = ctx.get("health")
     if hc:
         wsh = wb.create_sheet("資料查核")
@@ -556,7 +610,10 @@ def compare_row(rec: PanelRecord, label: str = "", option: str = "", extra: dict
         "panel_model": s.panel_model or "",
         "touch": "觸控" if s.touch else "",
         "score": f"{k}/{t}", "score_pct": round(k / t * 100),
-        "best": set(), "source_url": rec.source_url, **(extra or {}),
+        "best": set(), "source_url": rec.source_url,
+        "marks": {k: (m, rec.source_of(f).label) for k, f in CMP_FIELDS.items()
+                  if getattr(s, f) not in (None, [], "") and (m := source_mark(rec.source_of(f)))},
+        **(extra or {}),
     }
 
 
@@ -672,6 +729,29 @@ COMPARE_COLUMNS = [
     ("面板來源", "可信度", lambda r: r["rec"].confidence.label, None, 9),
     ("面板來源", "網址", lambda r: r["source_url"], None, 30),
 ]
+# 比較表欄名 → 規格欄位（儲存格註解顯示出處與原文）
+COLUMN_FIELDS = {"尺寸": "size_inch", "面板": "panel_tech", "解析度": "res_w", "刷新率 Hz": "refresh_hz", "反應 ms": "response_ms",
+                 "VRR": "vrr_range", "SDR nits": "sdr_nits", "HDR nits": "hdr_peak_nits", "DCI-P3 %": "dci_p3_pct",
+                 "sRGB %": "srgb_pct", "Adobe %": "adobe_rgb_pct", "NTSC %": "ntsc_pct", "ΔE": "delta_e",
+                 "表面": "surface", "表面原文": "surface", "反射率 %": "reflectance_pct", "均勻度 %": "uniformity_pct",
+                 "可視角": "viewing_angle", "背板": "backplane", "觸控": "touch", "屏佔比 %": "screen_to_body_pct",
+                 "面板厚度 mm": "panel_thickness_mm", "邊框": "bezel", "鏡頭": "camera_cutout", "eDP": "edp_version",
+                 "VRR 最低 Hz": "vrr_min_hz", "面板功耗 W": "panel_power_w", "面板廠": "panel_maker", "面板型號": "panel_model"}
+
+
+def source_note(rec: PanelRecord, field: str) -> str:
+    fs = rec.source_of(field)
+    quote = rec.spec.evidence.get(field) or ""
+    lines = [f"出處：{fs.label}"]
+    if fs.url:
+        lines.append(fs.url[:120])
+    if quote:
+        lines.append(f"原文：「{str(quote)[:160]}」")
+    if rec.corroborated.get(field):
+        lines.append("佐證：" + "、".join(rec.corroborated[field]))
+    return "\n".join(lines)
+
+
 GROUP_COLORS = {"基本": "1F4E79", "動態": "2E75B6", "亮度與色彩": "C55A11", "表面與光學": "548235",
                 "結構": "7030A0", "機構": "806000", "介面": "2F5597", "面板來源": "404040"}
 
@@ -737,6 +817,13 @@ def write_compare_sheet(ws, ctx: dict):
                     c.fill = stripe_fill
                 if id(r) in best.get(idx, ()):
                     c.fill, c.font = best_fill, best_font
+                fld = COLUMN_FIELDS.get(COMPARE_COLUMNS[idx][1])
+                if fld and getattr(r["rec"].spec, fld) not in (None, [], "") and c.value not in (None, ""):
+                    cm = Comment(source_note(r["rec"], fld), "display-intel")
+                    cm.width, cm.height = 320, 110
+                    c.comment = cm
+                    if source_mark(r["rec"].source_of(fld)):
+                        c.font = Font(color="B4580A", bold=c.font.bold)
             if r["label"]:
                 ws.cell(row=rr, column=1).font = Font(bold=True)
             url = r.get("source_url")
@@ -761,6 +848,7 @@ def write_compare_sheet(ws, ctx: dict):
             ws.append(["尚未建檔：" + "、".join(f"{p['name']}（{p['status']}）" for p in w["pending"])])
             ws.cell(row=ws.max_row, column=1).font = Font(italic=True, color="7F7F7F")
     ws.append([])
-    ws.append(["說明：空白＝文章沒寫（不是不支援）；表面代碼 AG 霧面、AGLR 抗眩光低反射、AR 抗反射、BV 亮面。"])
+    ws.append(["說明：空白＝文章沒寫（不是不支援）；表面代碼 AG 霧面、AGLR 抗眩光低反射、AR 抗反射、BV 亮面。"
+               "滑鼠移到數值上可看出處與原文；橘字＝傳聞、面板原廠規格或人工更正。"])
     ws.cell(row=ws.max_row, column=1).font = Font(italic=True, color="7F7F7F")
     return ws
