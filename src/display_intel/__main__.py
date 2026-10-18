@@ -110,6 +110,8 @@ def cmd_collect(cfg: dict, args) -> int:
                 log.exception("規格補完失敗（不影響已完成的蒐集）")
                 stats["enrich"] = {"error": f"{type(exc).__name__}：{exc}"}
         stats["llm_calls_total"] = llm.calls
+        if llm.switched:
+            stats["llm_switched"] = llm.switched
         stats["tavily_month_total"] = db.usage("tavily")
         log.info("完成：%s", stats.get("ingest", {}))
         return 0
@@ -138,11 +140,10 @@ def _working_llm(cfg: dict, stats: dict):
         if result == "ok":
             stats["llm_probe"] = probes
             stats["llm_model"] = model
+            llm.fallbacks = [m for m in candidates[candidates.index(model) + 1:]]
             if model != cfg["llm"]["extract_model"]:
                 log.warning("設定的模型 %s 無法使用，改用 %s。建議到 config.yaml 更新 extract_model", cfg["llm"]["extract_model"], model)
             return llm
-        if "BudgetExceeded" in result:
-            break
     stats["llm_probe"] = probes
     return None
 

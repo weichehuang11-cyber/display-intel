@@ -121,6 +121,12 @@ def _derived(rec: PanelRecord) -> PanelRecord:
     return rec
 
 
+def _domain(url: str | None) -> str:
+    from urllib.parse import urlsplit
+    host = urlsplit(url or "").netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, flags: list[str],
                 use_article_date: bool = True) -> PanelEvent | None:
     key = panel_key(spec)
@@ -147,6 +153,13 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
         if ov in (None, [], ""):
             old[f] = nv
             changes[f] = [None, nv]
+        elif nv == ov:
+            # 另一個獨立網站寫出相同數值 → 記為佐證（同網域不算）
+            dom = _domain(article.url)
+            if f not in ("brand", "model") and dom and dom != _domain(existing.source_url) and conf.rank >= Confidence.C.rank:
+                seen = existing.corroborated.setdefault(f, [])
+                if dom not in seen and len(seen) < 5:
+                    seen.append(dom)
         elif nv != ov:
             if conf.rank > existing.confidence.rank:
                 old[f] = nv

@@ -269,3 +269,8 @@ report:
   ongoing_days: 30          # 「持續討論中」回看天數
   output_dir: output
   database: data/intel.sqlite
+
+# 週報最後的「系統健康與資料查核」（全部由程式檢查，不花 AI 與 Tavily 額度）
+health:
+  collect_weekdays: [0, 2, 4, 6]   # 預期蒐集的日子（0=週一 … 6=週日），沒跑會提醒
+  audit_samples: 5                 # 每週隨機抽幾款，列出數值＋原文給你人工核對

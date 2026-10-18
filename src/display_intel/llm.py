@@ -56,6 +56,8 @@ class LLM:
         self.max_output_tokens = max_output_tokens
         self.calls = 0
         self._last = 0.0
+        self.fallbacks: list[str] = []  # 免費額度是各模型分開算：這個模型額度用完時依序改用
+        self.switched: list[str] = []
         if provider == "anthropic":
             import anthropic
             self._client = anthropic.Anthropic(api_key=env("ANTHROPIC_API_KEY", required=True))
@@ -102,7 +104,12 @@ class LLM:
                 if status == 429:
                     retry_after = float(exc.response.headers.get("retry-after", 0) or 0)
                     if retry_after > 600 or attempt == retries - 1:
-                        # 等超過 10 分鐘通常代表今天的免費額度用完了
+                        # 等超過 10 分鐘通常代表今天的免費額度用完了；還有備用模型就換一個繼續
+                        if self.fallbacks:
+                            old, self.model = self.model, self.fallbacks.pop(0)
+                            self.switched.append(f"{old} → {self.model}")
+                            log.warning("%s 今日免費額度用完，改用 %s 繼續", old, self.model)
+                            return self.complete_json(system, user, retries)
                         raise BudgetExceeded(f"免費額度已用完（429，需等待 {retry_after:.0f} 秒）") from exc
                     time.sleep(max(retry_after, 20 * (attempt + 1)))
                     continue

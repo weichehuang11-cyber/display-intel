@@ -75,6 +75,7 @@
 
   <div style="font-size:21px;font-weight:bold;margin:0 0 2px;">{{ title }}</div>
   <div style="color:#777;font-size:13px;margin-bottom:14px;">{{ date }}（週{{ weekday }}）・{{ period }}</div>
+  {% if health %}<div style="font-size:13px;margin:-8px 0 14px;color:#555;">系統狀態：{{ health.icon }} {{ health.summary }}{% if health.level != "ok" %}（見文末「系統健康與資料查核」）{% endif %}</div>{% endif %}
 
   {#- 關鍵數字：2 欄 × 2 列，手機也排得下 -#}
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:separate;border-spacing:6px;">
@@ -270,6 +271,35 @@
   </ul>
   {% else %}<p style="font-size:13px;color:#777;margin-top:0;">近期也沒有相關紀錄。</p>{% endif %}
   {% endfor %}
+  {% endif %}
+
+  {% if health %}
+  {{ h2("系統健康與資料查核　" ~ health.icon, "#475569") }}
+  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">全部由程式檢查，不花 AI 額度。🟢 正常　🟡 注意　🔴 需處理</div>
+  {% for title, rows in [("運作狀況", health.ops), ("資料正確性", health.quality)] %}
+  <div style="font-size:14px;font-weight:bold;margin:10px 0 4px;">{{ title }}</div>
+  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="font-size:13px;line-height:1.5;border-collapse:collapse;">
+    {% for c in rows %}
+    <tr style="border-bottom:1px solid #eef0f2;">
+      <td style="width:22px;vertical-align:top;">{{ c.icon }}</td>
+      <td style="width:84px;vertical-align:top;font-weight:bold;white-space:nowrap;">{{ c.name }}</td>
+      <td style="vertical-align:top;">{{ c.detail }}
+        {% if c.notes %}<ul style="margin:4px 0 0;padding-left:18px;color:#666;font-size:12px;">{% for it in c.notes %}<li>{{ it }}</li>{% endfor %}</ul>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+  {% if health.audit %}
+  <div style="font-size:14px;font-weight:bold;margin:14px 0 4px;">抽樣稽核（本週隨機 {{ health.audit|length }} 款，點來源 1 分鐘可核對）</div>
+  {% for a in health.audit %}
+  <div style="border-left:3px solid #cbd5e1;padding:4px 10px;margin:0 0 8px;font-size:13px;line-height:1.6;">
+    <b>{{ a.model }}</b> <span style="color:#888;font-size:12px;">{{ a.confidence }}</span>
+    {% for ln in a.lines %}<div>{{ ln.field }}＝<b>{{ ln.value }}</b>　<span style="color:#777;">原文：「{{ ln.quote }}」</span></div>{% endfor %}
+    <a href="{{ a.source_url }}" style="color:#1f5fa8;text-decoration:none;font-size:12px;">{{ a.source_name or "來源" }} ›</a>
+  </div>
+  {% endfor %}
+  {% endif %}
   {% endif %}
 
   {% if glossary %}

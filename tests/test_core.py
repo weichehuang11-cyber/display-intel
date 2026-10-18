@@ -866,3 +866,67 @@ def test_excel_compare_sheet(tmp_path):
     asus = next(r for r in ws.iter_rows(min_row=3) if r[0].value == "ASUS B")
     hz = [c for c in asus if c.value == 144][0]
     assert hz.fill.fgColor.rgb.endswith("C6EFCE")
+
+
+def test_health_consistency_and_corroboration(tmp_path):
+    from datetime import datetime, timezone
+    from display_intel import health
+    from display_intel.db import DB
+    r = _rec("h1", 1, brand="HP", model="X", panel_tech="OLED", mini_led_zones=512, refresh_hz=120,
+             vrr_range="48-165Hz", certifications=["VESA DisplayHDR True Black 600"], hdr_peak_nits=400,
+             panel_model="NE160QDM-NZ1", size_inch=14)
+    issues = health.consistency_issues(r)
+    assert any("Mini LED" in i for i in issues) and any("DisplayHDR 600" in i for i in issues)
+    assert any("VRR 範圍" in i for i in issues) and any("16 吋" in i for i in issues)
+    assert health.consistency_issues(_rec("h2", 1, brand="HP", model="Y", panel_tech="IPS", refresh_hz=120)) == []
+
+    # 不同網站寫出相同數值 → 佐證；同網站不算
+    db = DB(tmp_path / "h.sqlite")
+    spec = PanelSpec(brand="Dell", model="XPS 14", refresh_hz=120, evidence={"refresh_hz": "120Hz"})
+    verify.merge_panel(db, spec, Confidence.C, art(url="https://www.a.com/1"), [])
+    verify.merge_panel(db, spec, Confidence.C, art(url="https://a.com/2"), [])
+    verify.merge_panel(db, spec, Confidence.C, art(url="https://b.com/3"), [])
+    rec = db.all_panels()[0]
+    assert rec.corroborated == {"refresh_hz": ["b.com"]}
+
+    now = datetime.now(timezone.utc)
+    h = health.build(db, {"collection": {"tavily_monthly_hard_cap": 950}}, now)
+    assert h["level"] in ("ok", "warn", "bad") and h["ops"][0]["name"] == "排程執行"
+    names = [c["name"] for c in h["quality"]]
+    assert names[:3] == ["原文依據", "自動攔截", "多來源佐證"] and "100%" in h["quality"][2]["detail"]
+    assert h["audit"] and h["audit"][0]["lines"][0]["quote"] == "120Hz"
+
+
+def test_health_filters_false_alarms():
+    from display_intel import health
+    a = _rec("d1", 1, brand="ASUS", model="ProArt P14")
+    b = _rec("d2", 1, brand="ASUS", model="ProArt P16")
+    c = _rec("d3", 1, brand="ASUS", model="Vivobook S16 M3607GA")
+    d = _rec("d4", 1, brand="ASUS", model="Vivobook S16 M3607KA")
+    dups = health.possible_duplicates([a, b, c, d, d])
+    assert len(dups) == 1 and "M3607GA" in dups[0]
+    r = _rec("d5", 1, brand="HP", model="X")
+    assert health._conflict(r, "來源數值不一致：gpu（RTX 5060 vs RTX 5070，Tavily 搜尋）") is None
+    assert health._conflict(r, "來源數值不一致：surface（matte vs anti-glare matte，A）") is None
+    assert health._conflict(r, "來源數值不一致：refresh_hz（120.0 vs 144.0，Tavily 搜尋）") == "HP X：刷新率 120 vs 144（Tavily 搜尋）"
+
+
+
+def test_llm_switches_model_when_quota_exhausted(monkeypatch):
+    import httpx
+    from display_intel import llm as llm_mod
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    m = llm_mod.LLM("gemini", "model-a", max_calls=10)
+    m.fallbacks = ["model-b"]
+    req = httpx.Request("POST", "https://x")
+
+    def fake(system, user):
+        if m.model == "model-a":
+            raise httpx.HTTPStatusError("429", request=req, response=httpx.Response(429, headers={"retry-after": "3600"}, request=req))
+        return '{"ok": true}'
+    monkeypatch.setattr(m, "_openai", fake)
+    assert m.complete_json("s", "u") == {"ok": True}
+    assert m.model == "model-b" and m.switched == ["model-a → model-b"]
+    m.model, m.fallbacks = "model-a", []
+    with pytest.raises(llm_mod.BudgetExceeded):
+        m.complete_json("s", "u")

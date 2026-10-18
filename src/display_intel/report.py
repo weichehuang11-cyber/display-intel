@@ -14,7 +14,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from . import analytics, derive, ihv
+from . import analytics, derive, health, ihv
 from .db import DB
 from .panel_decode import canonical_maker
 from .schema import Confidence, PanelRecord, PanelSpec
@@ -301,6 +301,11 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
     ctx["subject"] = (f"{cfg['report'].get('subject_prefix', '[顯示器情報]')} {ctx['date']}｜"
                       f"新機 {len(ctx['new_panels'])}・更新 {len(ctx['updates'])}・平台 {len(ctx['platform'])}・"
                       f"產線 {len(ctx['fabs'])}・傳聞 {n_rumor}")
+    try:
+        ctx["health"] = health.build(db, cfg, today, all_records, 7 if weekly else 1)
+    except Exception as exc:  # 健康檢查失敗不影響寄報告
+        log.warning("健康檢查失敗：%s", exc)
+        ctx["health"] = None
     return ctx
 
 
@@ -475,6 +480,16 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
         sheet(ws5, ["技術", "說明", f"{ctx.get('period_label', '本期')}款數", f"{ctx.get('period_label', '本期')}提及率", "前 30 天提及率"],
               [[r["feature"], r["desc"], r["count"], r["share"], r["base_share"]] for r in ctx["mentions"]])
 
+    hc = ctx.get("health")
+    if hc:
+        wsh = wb.create_sheet("資料查核")
+        rows_h = [[sec, c["icon"] + " " + {"ok": "正常", "warn": "注意", "bad": "需處理"}[c["level"]], c["name"], c["detail"], it]
+                  for sec, key in (("運作", "ops"), ("資料", "quality")) for c in hc[key] for it in (c["notes"] or [""])]
+        rows_h += [["抽樣稽核", a["confidence"], a["model"], f"{ln['field']}：{_fmt(ln['value'])}", f"原文：「{ln['quote']}」　{a['source_url']}"]
+                   for a in hc["audit"] for ln in a["lines"]]
+        sheet(wsh, ["類別", "狀態", "檢查項目", "結果", "明細"], rows_h)
+        wsh.column_dimensions["D"].width = 50
+        wsh.column_dimensions["E"].width = 80
     ws3 = wb.create_sheet("平台與產線")
     sheet(ws3, ["類別", "廠商", "項目", "分類／狀態", "摘要", "可信度", "來源", "網址"],
           [["平台", r["vendor"], r["tech"], r["category"], r["summary"], r["confidence"], r["source_name"], r["source_url"]]

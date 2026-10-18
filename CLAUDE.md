@@ -15,13 +15,14 @@ collect.py  蒐集：RSS、Google 新聞 RSS（多語系）、Tavily（選用）
 verify.py   去重（網址＋標題相似度）→ AI 萃取後合併到資料庫、可信度、傳聞追蹤
 extract.py  萃取：多篇文章一批送 AI，輸出 JSON；回來後逐字比對原文依據
 derive.py   衍生規格（PPI、長寬比、像素密度）、合理性檢查、原文依據檢查
-llm.py      AI 介面：gemini（預設免費）/ anthropic，內建節流與額度保護；GitHub Models 已於 2026-07-30 停止服務
+llm.py      AI 介面：gemini（預設免費）/ anthropic，內建節流與額度保護；429 額度用完時依 fallbacks 換模型（記在 stats.llm_switched）；GitHub Models 已於 2026-07-30 停止服務
 db.py       SQLite（data/intel.sqlite，由 GitHub Actions commit 回 repo）
 report.py   未報告事件 → HTML Email（templates/report.html.j2：依尺寸分段比較表＋關注機型比較表在前，詳細卡片在附錄）＋ Excel（第一頁「比較表」：COMPARE_COLUMNS 分群表頭、同段最佳值標綠）
 analytics.py 規格完整度（13 項重點欄位，含觸控）、關鍵數字、亮點、週對週、技術提及率、品牌×面板廠、傳聞追蹤、名詞辭典（全部程式計算，不經 AI）
 enrich.py   規格補完（以機型為單位）：完整度未達 enrich_target 的機型，依 enrich_schedule_days 回訪；每次評測網站＋官方規格各搜尋一次 → focus 萃取 → 合併；有面板型號時反查面板原廠規格（只填空白，記在 panel_spec_fields）；Tavily 月用量記在 db.usage，達 enrich_monthly_cap 停止
             關注機型（watchlist）：watch_due 依 watch_state 表排程 → search_watch（中文機型用中文查詢）→ focus 萃取 → ingest(tag="watch")；報告中 watch 建檔的 new 事件不算新機
 backfill.py 歷史回溯：季度×查詢單位（backfill_state 表），Tavily start/end_date＋Google 新聞 after:/before:，ingest(tag="backfill")；報告中 backfill 事件不進本期卡片，只進季度趨勢；announced 取最早新聞日期
+health.py   週報「系統健康與資料查核」：運作（排程、來源、AI／Tavily、資料量，讀 runs 表 stats）＋資料（原文依據、攔截率、多來源佐證 corroborated、來源不一致、跨欄位矛盾、重複機型、抽樣稽核）；全部程式計算，失敗不影響寄信
 ihv.py      平台適配性：cpu/gpu 廠商推算、五項評比（✓/✗/?/—，未知不等於不支援）、平台 × 面板對照表
 panel_decode.py 面板型號前綴 → 面板廠與尺寸（標示「推算」）、面板廠名稱統一
 mailer.py   Gmail SMTP（應用程式密碼）

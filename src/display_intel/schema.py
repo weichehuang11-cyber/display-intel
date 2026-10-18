@@ -198,6 +198,7 @@ class PanelRecord(BaseModel):
     panel_lookup_done: bool = False
     watch: Optional[str] = None  # 屬於哪一個關注機型（config.yaml 的 watchlist）
     panel_spec_fields: list[str] = Field(default_factory=list)  # 來自面板原廠規格（非整機實測）的欄位
+    corroborated: dict[str, list[str]] = Field(default_factory=dict)  # 欄位 → 數值一致的其他獨立來源（網域）
 
     @property
     def maker(self) -> Optional[str]:
