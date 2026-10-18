@@ -60,6 +60,7 @@ python -m display_intel demo # 產生 output/report-日期.html
 - 社群只有 Reddit RSS；X、微博需付費 API 或第三方服務
 - 面板廠世代線尚未有獨立的能力檔案資料表（目前以 fab 事件記錄），每月對照表未實作
 - 爆料者命中率統計未實作
-- 報告尚未內嵌圖表；網頁版資料庫（GitHub Pages）未實作
+- 圖表目前只有季度趨勢（Email 用表格畫 100% 堆疊橫條、Excel 原生圖表）；網頁版資料庫（GitHub Pages）未實作
+- 價格只收文章寫出的上市起價；匯率為 config 中的概略值
 
 設計文件（完整 Schema、來源清單、路線圖）在使用者的 claude.ai「筆電顯示器情報 AI Agent 系統設計」文件中。
