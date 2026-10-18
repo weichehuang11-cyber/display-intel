@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from . import analytics, derive, ihv
 from .db import DB
@@ -267,12 +268,14 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "quarterly": analytics.quarterly_trends(all_records),
         "backfill": backfill_status(db, cfg, backfilled),
         "watch": watch_rows(db, cfg, all_records, set(grouped)),
+        "watch_cmp": watch_comparison(db, cfg, all_records, set(grouped)) if cfg.get("watchlist") else None,
     }
     # 卡片依機型合併（螢幕選配列在同一張卡片內）
     for k in ("new_panels", "updates", "confirmed", "rumor_panels"):
         ctx[k + "_flat"] = ctx[k]
         ctx[k] = group_by_model(ctx[k])
     ctx["panel_known"] = sum(1 for c in ctx["new_panels"] if c["panel_known"])
+    ctx["compare_new"] = comparison(ctx["new_panels"])
     if ctx["kpis"]:
         ctx["kpis"][0] = {"label": "新機型", "value": str(len(ctx["new_panels"])),
                           "note": f"共 {len(new_panels)} 種螢幕選配"}
@@ -404,8 +407,8 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
         for col in ws.columns:
             ws.column_dimensions[col[0].column_letter].width = min(40, max(10, max(len(str(c.value or "")) for c in col) + 2))
 
-    ws = wb.active
-    ws.title = f"{ctx.get('period_label', '今日')}新增與更新"
+    write_compare_sheet(wb.active, ctx)
+    ws = wb.create_sheet(f"{ctx.get('period_label', '今日')}新增與更新")
     rows = []
     for kind, items in [("新機", ctx.get("new_panels_flat", ctx["new_panels"])), ("更新", ctx.get("updates_flat", ctx["updates"])),
                         ("傳聞證實", ctx.get("confirmed_flat", ctx["confirmed"])), ("傳聞", ctx.get("rumor_panels_flat", ctx["rumor_panels"]))]:
@@ -500,3 +503,249 @@ def build_report(db: DB, cfg: dict, llm=None) -> tuple[dict, str, Path, list[int
     (out / f"report-{ctx['date']}.html").write_text(html, encoding="utf-8")
     xlsx = write_excel(ctx, db, out / f"display-intel-{ctx['date']}.xlsx")
     return ctx, html, xlsx, [e["id"] for e in events]
+
+
+# ---------- 比較表 ----------
+
+SEGMENT_ORDER = ["13 吋以下", "14 吋級", "15.6 吋級", "16 吋級", "17–18 吋", "AIO", "尺寸未標示"]
+# 欄位 → 數值取法、最佳方向（max / min）
+BEST_RULES = {
+    "refresh": (lambda s, r: s.refresh_hz, max), "response": (lambda s, r: s.response_ms, min),
+    "sdr": (lambda s, r: s.sdr_nits, max), "hdr": (lambda s, r: s.hdr_peak_nits, max),
+    "p3": (lambda s, r: s.dci_p3_pct, max), "ppi": (lambda s, r: r.ppi, max),
+}
+
+
+def _segment(rec: PanelRecord) -> str:
+    return analytics._size_bucket(rec) or "尺寸未標示"
+
+
+def compare_row(rec: PanelRecord, label: str = "", option: str = "", extra: dict | None = None) -> dict:
+    s = rec.spec
+    code = derive.surface_code(s.surface)
+    gamut = [f"P3 {s.dci_p3_pct:g}%" if s.dci_p3_pct else "", f"sRGB {s.srgb_pct:g}%" if s.srgb_pct else "",
+             f"Adobe {s.adobe_rgb_pct:g}%" if s.adobe_rgb_pct else "", f"NTSC {s.ntsc_pct:g}%" if s.ntsc_pct else ""]
+    maker = rec.maker
+    k, t = analytics.completeness(rec)
+    return {
+        "rec": rec, "label": label, "option": option, "segment": _segment(rec),
+        "size": f'{s.size_inch:g}"' if s.size_inch else (f'{rec.size_inferred:g}"*' if rec.size_inferred else "—"),
+        "tech": s.panel_tech or "—",
+        "res": f"{s.res_w}×{s.res_h}" if s.res_w and s.res_h else "—", "aspect": rec.aspect_ratio if rec.aspect_ratio and len(rec.aspect_ratio) <= 5 else "",
+        "refresh": f"{s.refresh_hz:g}Hz" if s.refresh_hz else "—",
+        "response": f"{s.response_ms:g}ms" if s.response_ms else "",
+        "sdr": f"{s.sdr_nits:g}" if s.sdr_nits else "—", "hdr": f"{s.hdr_peak_nits:g}" if s.hdr_peak_nits else "",
+        "gamut": [g for g in gamut if g] or ["—"],
+        "surface": code or ((s.surface[:14] + ("…" if len(s.surface) > 14 else "")) if s.surface else "—"),
+        "maker": (f"{maker}*" if rec.panel_maker_inferred else maker) if maker else "—",
+        "panel_model": s.panel_model or "",
+        "touch": "觸控" if s.touch else "",
+        "score": f"{k}/{t}", "score_pct": round(k / t * 100),
+        "best": set(), "source_url": rec.source_url, **(extra or {}),
+    }
+
+
+def mark_best(rows: list[dict]):
+    """在同一組裡標出各欄最佳值（同分都標；少於 2 個有效值不標）。"""
+    for key, (get, pick) in BEST_RULES.items():
+        vals = [(get(r["rec"].spec, r["rec"]), r) for r in rows]
+        vals = [(v, r) for v, r in vals if v]
+        if len(vals) < 2:
+            continue
+        best = pick(v for v, _ in vals)
+        for v, r in vals:
+            if v == best:
+                r["best"].add(key)
+
+
+def comparison(groups: list[dict]) -> list[dict]:
+    """把（已依機型合併的）卡片轉成比較表，依尺寸級距分組。"""
+    segs: dict[str, list] = {}
+    for c in groups:
+        opts = c.get("options") or [c]
+        for i, o in enumerate(opts):
+            row = compare_row(o["rec"], f"{c['brand']} {c['model']}" if i == 0 else "",
+                              f"選配 {i + 1}" if len(opts) > 1 else "", {"tags": c.get("tags", []) if i == 0 else []})
+            segs.setdefault(row["segment"], []).append(row)
+    out = []
+    for name in sorted(segs, key=lambda x: SEGMENT_ORDER.index(x) if x in SEGMENT_ORDER else 99):
+        mark_best(segs[name])
+        _stripe(segs[name])
+        out.append({"name": name, "rows": segs[name]})
+    return out
+
+
+def _stripe(rows: list[dict]):
+    """同一款機型的選配同底色，機型之間交替，方便閱讀。"""
+    on = True
+    for r in rows:
+        if r["label"]:
+            on = not on
+        r["stripe"] = on
+
+
+def watch_comparison(db: DB, cfg: dict, records: list[PanelRecord], updated_keys: set[str]) -> dict:
+    """關注機型比較表：每個關注項目取資料最完整的選配；尚未建檔的列在 pending。"""
+    from .enrich import watch_items, watch_matches
+    rows, pending = [], []
+    for item in watch_items(cfg):
+        recs = [r for r in records if watch_matches(item, r.spec) and r.confidence.rank >= Confidence.C.rank]
+        if not recs:
+            pending.append({"name": item["name"], "status": "查無規格頁，下次回查" if db.watch_last_checked(item["name"]) else "排隊建檔中"})
+            continue
+        best = max(recs, key=lambda r: analytics.completeness(r)[0])
+        models = list(dict.fromkeys(r.spec.model for r in recs if r.spec.model))
+        rows.append(compare_row(best, item["name"], f"{len(recs)} 種選配" if len(recs) > 1 else "",
+                                {"updated": any(r.key in updated_keys for r in recs), "models": "、".join(models[:3])}))
+    mark_best(rows)
+    _stripe(rows)
+    return {"rows": rows, "pending": pending}
+
+
+# ---------- Excel 比較表（第一個工作表） ----------
+
+def _j(v) -> str:
+    if v is None or v == "" or v == []:
+        return ""
+    if isinstance(v, list):
+        return "、".join(map(str, v))
+    if isinstance(v, bool):
+        return "有" if v else "無"
+    return _fmt(v)
+
+
+# (群組, 欄名, 取值, 最佳方向 max/min/None, 欄寬)
+COMPARE_COLUMNS = [
+    ("基本", "機型", lambda r: r["label"], None, 26),
+    ("基本", "選配", lambda r: r["option"], None, 9),
+    ("基本", "尺寸", lambda r: r["rec"].spec.size_inch or r["rec"].size_inferred, None, 7),
+    ("基本", "面板", lambda r: r["rec"].spec.panel_tech, None, 9),
+    ("基本", "解析度", lambda r: r["res"] if r["res"] != "—" else "", None, 12),
+    ("基本", "長寬比", lambda r: r["aspect"], None, 8),
+    ("基本", "PPI", lambda r: r["rec"].ppi, max, 7),
+    ("動態", "刷新率 Hz", lambda r: r["rec"].spec.refresh_hz, max, 9),
+    ("動態", "反應 ms", lambda r: r["rec"].spec.response_ms, min, 8),
+    ("動態", "VRR", lambda r: _j(r["rec"].spec.vrr_range) or _j(r["rec"].spec.vrr_tech), None, 12),
+    ("亮度與色彩", "SDR nits", lambda r: r["rec"].spec.sdr_nits, max, 9),
+    ("亮度與色彩", "HDR nits", lambda r: r["rec"].spec.hdr_peak_nits, max, 9),
+    ("亮度與色彩", "DCI-P3 %", lambda r: r["rec"].spec.dci_p3_pct, max, 8),
+    ("亮度與色彩", "sRGB %", lambda r: r["rec"].spec.srgb_pct, max, 8),
+    ("亮度與色彩", "Adobe %", lambda r: r["rec"].spec.adobe_rgb_pct, max, 8),
+    ("亮度與色彩", "NTSC %", lambda r: r["rec"].spec.ntsc_pct, max, 8),
+    ("亮度與色彩", "ΔE", lambda r: r["rec"].spec.delta_e, min, 6),
+    ("亮度與色彩", "色深", lambda r: r["rec"].spec.color_depth_desc or (f"{r['rec'].spec.color_depth_bit}-bit" if r["rec"].spec.color_depth_bit else ""), None, 10),
+    ("表面與光學", "表面", lambda r: derive.surface_code(r["rec"].spec.surface) or "", None, 8),
+    ("表面與光學", "表面原文", lambda r: r["rec"].spec.surface, None, 16),
+    ("表面與光學", "反射率 %", lambda r: r["rec"].spec.reflectance_pct, min, 8),
+    ("表面與光學", "均勻度 %", lambda r: r["rec"].spec.uniformity_pct, max, 8),
+    ("表面與光學", "可視角", lambda r: r["rec"].spec.viewing_angle, None, 10),
+    ("結構", "背板", lambda r: r["rec"].spec.backplane, None, 8),
+    ("結構", "背光／調光", lambda r: " / ".join(x for x in [r["rec"].spec.backlight, r["rec"].spec.dimming] if x), None, 14),
+    ("結構", "觸控", lambda r: (("觸控 " + (r["rec"].spec.touch_structure or "")).strip() if r["rec"].spec.touch
+                              else ("非觸控" if r["rec"].spec.touch is False else "")), None, 12),
+    ("機構", "屏佔比 %", lambda r: r["rec"].spec.screen_to_body_pct, max, 8),
+    ("機構", "面板厚度 mm", lambda r: r["rec"].spec.panel_thickness_mm, min, 9),
+    ("機構", "邊框", lambda r: r["rec"].spec.bezel, None, 12),
+    ("機構", "鏡頭", lambda r: r["rec"].spec.camera_cutout, None, 10),
+    ("介面", "eDP", lambda r: r["rec"].spec.edp_version, None, 9),
+    ("介面", "VRR 最低 Hz", lambda r: r["rec"].spec.vrr_min_hz, min, 9),
+    ("介面", "面板功耗 W", lambda r: r["rec"].spec.panel_power_w, min, 9),
+    ("介面", "省電技術", lambda r: _j(r["rec"].spec.low_power_tech) or _j(r["rec"].spec.display_power_tech), None, 14),
+    ("面板來源", "面板廠", lambda r: r["maker"] if r["maker"] != "—" else "", None, 14),
+    ("面板來源", "面板型號", lambda r: r["panel_model"], None, 14),
+    ("面板來源", "完整度", lambda r: r["score"], None, 7),
+    ("面板來源", "可信度", lambda r: r["rec"].confidence.label, None, 9),
+    ("面板來源", "網址", lambda r: r["source_url"], None, 30),
+]
+GROUP_COLORS = {"基本": "1F4E79", "動態": "2E75B6", "亮度與色彩": "C55A11", "表面與光學": "548235",
+                "結構": "7030A0", "機構": "806000", "介面": "2F5597", "面板來源": "404040"}
+
+
+def write_compare_sheet(ws, ctx: dict):
+    """比較表：兩層表頭（欄位群組）、依尺寸分段、同段最佳值標綠、機型交替底色。"""
+    ws.title = "比較表"
+    white = Font(bold=True, color="FFFFFF")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    best_fill, best_font = PatternFill("solid", fgColor="C6EFCE"), Font(bold=True, color="006100")
+    stripe_fill = PatternFill("solid", fgColor="F2F2F2")
+    sec_fill, seg_fill = PatternFill("solid", fgColor="DDEBF7"), PatternFill("solid", fgColor="FFF2CC")
+    thin = Side(style="thin", color="BFBFBF")
+    n = len(COMPARE_COLUMNS)
+
+    # 第 1–2 列：群組表頭＋欄名
+    col = 1
+    for i, (grp, name, _, _, width) in enumerate(COMPARE_COLUMNS, 1):
+        fill = PatternFill("solid", fgColor=GROUP_COLORS.get(grp, "404040"))
+        for row, val in ((1, grp), (2, name)):
+            c = ws.cell(row=row, column=i, value=val)
+            c.font, c.fill, c.alignment = white, fill, center
+        ws.column_dimensions[get_column_letter(i)].width = width
+    start = 1
+    for i in range(1, n + 2):
+        if i > n or COMPARE_COLUMNS[i - 1][0] != COMPARE_COLUMNS[start - 1][0]:
+            if i - 1 > start:
+                ws.merge_cells(start_row=1, start_column=start, end_row=1, end_column=i - 1)
+            start = i
+    ws.row_dimensions[2].height = 30
+    ws.freeze_panes = "C3"
+
+    def section(title, fill):
+        r = ws.max_row + 1
+        ws.cell(row=r, column=1, value=title).font = Font(bold=True, size=12 if fill is sec_fill else 11)
+        for i in range(1, n + 1):
+            ws.cell(row=r, column=i).fill = fill
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=n)
+
+    def best_cols(rows):
+        out = {}
+        for idx, (_, _, get, pick, _) in enumerate(COMPARE_COLUMNS):
+            if pick is None:
+                continue
+            vals = [(get(r), id(r)) for r in rows]
+            vals = [(v, k) for v, k in vals if isinstance(v, (int, float)) and v]
+            if len(vals) < 2:
+                continue
+            b = pick(v for v, _ in vals)
+            out[idx] = {k for v, k in vals if v == b}
+        return out
+
+    def table(rows):
+        best = best_cols(rows)
+        for r in rows:
+            ws.append([("" if (v := get(r)) is None else v) for _, _, get, _, _ in COMPARE_COLUMNS])
+            rr = ws.max_row
+            for idx in range(n):
+                c = ws.cell(row=rr, column=idx + 1)
+                c.border = Border(bottom=thin)
+                c.alignment = Alignment(vertical="center", wrap_text=COMPARE_COLUMNS[idx][4] >= 12)
+                if r.get("stripe"):
+                    c.fill = stripe_fill
+                if id(r) in best.get(idx, ()):
+                    c.fill, c.font = best_fill, best_font
+            if r["label"]:
+                ws.cell(row=rr, column=1).font = Font(bold=True)
+            url = r.get("source_url")
+            if url:
+                c = ws.cell(row=rr, column=n)
+                c.hyperlink, c.font = url, Font(color="0563C1", underline="single")
+
+    period = ctx.get("period_label", "本期")
+    segs = ctx.get("compare_new") or []
+    section(f"{period}新機（依尺寸分段；綠底＝同段最佳；* 為由面板型號推算）", sec_fill)
+    if not segs:
+        section("（本期沒有新機）", PatternFill(fill_type=None))
+    for seg in segs:
+        section(f"▸ {seg['name']}（{len({r['rec'].spec.model for r in seg['rows']})} 款）", seg_fill)
+        table(seg["rows"])
+    w = ctx.get("watch_cmp") or {}
+    if w.get("rows") or w.get("pending"):
+        ws.append([])
+        section("關注機型（每個項目取資料最完整的選配；綠底＝關注清單中最佳）", sec_fill)
+        table(w.get("rows", []))
+        if w.get("pending"):
+            ws.append(["尚未建檔：" + "、".join(f"{p['name']}（{p['status']}）" for p in w["pending"])])
+            ws.cell(row=ws.max_row, column=1).font = Font(italic=True, color="7F7F7F")
+    ws.append([])
+    ws.append(["說明：空白＝文章沒寫（不是不支援）；表面代碼 AG 霧面、AGLR 抗眩光低反射、AR 抗反射、BV 亮面。"])
+    ws.cell(row=ws.max_row, column=1).font = Font(italic=True, color="7F7F7F")
+    return ws

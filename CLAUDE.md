@@ -17,7 +17,7 @@ extract.py  萃取：多篇文章一批送 AI，輸出 JSON；回來後逐字比
 derive.py   衍生規格（PPI、長寬比、像素密度）、合理性檢查、原文依據檢查
 llm.py      AI 介面：gemini（預設免費）/ anthropic，內建節流與額度保護；GitHub Models 已於 2026-07-30 停止服務
 db.py       SQLite（data/intel.sqlite，由 GitHub Actions commit 回 repo）
-report.py   未報告事件 → HTML Email（templates/report.html.j2，卡片式、手機友善）＋ Excel
+report.py   未報告事件 → HTML Email（templates/report.html.j2：依尺寸分段比較表＋關注機型比較表在前，詳細卡片在附錄）＋ Excel（第一頁「比較表」：COMPARE_COLUMNS 分群表頭、同段最佳值標綠）
 analytics.py 規格完整度（13 項重點欄位，含觸控）、關鍵數字、亮點、週對週、技術提及率、品牌×面板廠、傳聞追蹤、名詞辭典（全部程式計算，不經 AI）
 enrich.py   規格補完（以機型為單位）：完整度未達 enrich_target 的機型，依 enrich_schedule_days 回訪；每次評測網站＋官方規格各搜尋一次 → focus 萃取 → 合併；有面板型號時反查面板原廠規格（只填空白，記在 panel_spec_fields）；Tavily 月用量記在 db.usage，達 enrich_monthly_cap 停止
             關注機型（watchlist）：watch_due 依 watch_state 表排程 → search_watch（中文機型用中文查詢）→ focus 萃取 → ingest(tag="watch")；報告中 watch 建檔的 new 事件不算新機

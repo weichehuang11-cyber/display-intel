@@ -36,6 +36,38 @@
   <div style="font-size:12px;margin-top:6px;">{% for o in c.sources %}{{ src(o) }}{% if not loop.last %}　{% endif %}{% endfor %}</div>
 </div>
 {%- endmacro -%}
+{%- macro best(r, key, text) -%}{% if key in r.best %}<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">{{ text }}</b>{% else %}{{ text }}{% endif %}{%- endmacro -%}
+{%- macro cmp_head() -%}
+<tr style="background:#1f3a5f;color:#fff;text-align:left;font-size:11px;">
+  <th style="padding:6px;">機型</th><th style="padding:6px;">螢幕</th><th style="padding:6px;">解析度</th>
+  <th style="padding:6px;">刷新／反應</th><th style="padding:6px;">亮度 nits<br><span style="font-weight:normal;">SDR／HDR</span></th>
+  <th style="padding:6px;">色域</th><th style="padding:6px;">表面</th><th style="padding:6px;">面板廠</th><th style="padding:6px;">規格</th>
+</tr>
+{%- endmacro -%}
+{%- macro cmp_row(r, stripe) -%}
+<tr style="border-top:1px solid #e3e6ea;vertical-align:top;font-size:12px;{% if stripe %}background:#f8fafc;{% endif %}">
+  <td style="padding:6px;min-width:96px;">{% if r.label %}<b>{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1a1a1a;text-decoration:none;">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</b>{% endif %}
+    {% if r.option %}<div style="font-size:10.5px;color:#999;">{{ r.option }}</div>{% endif %}
+    {% if r.updated %}<div style="font-size:10.5px;color:#1e7d4f;">● {{ period_label }}有更新</div>{% endif %}
+    {% for tg in r.tags or [] %}<div style="font-size:10.5px;color:#a16207;">★ {{ tg }}</div>{% endfor %}</td>
+  <td style="padding:6px;white-space:nowrap;">{{ r.size }}<div style="font-size:10.5px;color:#666;">{{ r.tech }}</div></td>
+  <td style="padding:6px;white-space:nowrap;">{{ r.res }}<div style="font-size:10.5px;color:#999;">{{ r.aspect }}</div></td>
+  <td style="padding:6px;white-space:nowrap;">{{ best(r, "refresh", r.refresh) }}{% if r.response %}<div style="font-size:10.5px;">{{ best(r, "response", r.response) }}</div>{% endif %}</td>
+  <td style="padding:6px;white-space:nowrap;">{{ best(r, "sdr", r.sdr) }}{% if r.hdr %}<div style="font-size:10.5px;">HDR {{ best(r, "hdr", r.hdr) }}</div>{% endif %}</td>
+  <td style="padding:6px;white-space:nowrap;">{% for g in r.gamut %}<div>{% if loop.first and g.startswith("P3") %}{{ best(r, "p3", g) }}{% else %}{{ g }}{% endif %}</div>{% endfor %}</td>
+  <td style="padding:6px;white-space:nowrap;">{{ r.surface }}{% if r.touch %}<div style="font-size:10.5px;color:#666;">{{ r.touch }}</div>{% endif %}</td>
+  <td style="padding:6px;">{{ r.maker }}{% if r.panel_model %}<div style="font-size:10.5px;color:#999;">{{ r.panel_model }}</div>{% endif %}</td>
+  <td style="padding:6px;white-space:nowrap;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">{{ r.score }}</td>
+</tr>
+{%- endmacro -%}
+{%- macro cmp_table(rows) -%}
+<div style="overflow-x:auto;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;background:#fff;border:1px solid #d5dae1;">
+  {{ cmp_head() }}
+  {% for r in rows %}{{ cmp_row(r, r.stripe) }}{% endfor %}
+</table>
+</div>
+{%- endmacro -%}
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ subject }}</title></head>
 <body style="margin:0;padding:0;background:#f2f4f7;font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;color:#222;">
@@ -71,10 +103,13 @@
   </ul>
   {% endif %}
 
-  {% if new_panels %}
-  {{ h2("新機型與新面板（" ~ new_panels|length ~ "）") }}
-  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">{{ panel_known }} 款已知面板來源。🖥 螢幕　☀ 亮度　🎨 色域　◻ 表面處理　👆 觸控　🏭 面板廠與型號</div>
-  {% for c in new_panels %}{{ card(c) }}{% endfor %}
+  {% if compare_new %}
+  {{ h2("新機規格比較（" ~ new_panels|length ~ " 款）") }}
+  <div style="font-size:11px;color:#888;margin:-4px 0 8px;">依尺寸分組；<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">綠底</b> 為組內最佳值；* 表示由面板型號推算；規格＝13 項重點規格已知幾項。點機型名稱可看來源。</div>
+  {% for seg in compare_new %}
+  <div style="font-size:13px;font-weight:bold;color:#1f3a5f;margin:12px 0 4px;">{{ seg.name }}（{{ seg.rows|selectattr("label")|list|length }} 款）</div>
+  {{ cmp_table(seg.rows) }}
+  {% endfor %}
   {% endif %}
 
   {% if updates %}
@@ -87,20 +122,11 @@
   {% for c in confirmed %}{{ card(c, True) }}{% endfor %}
   {% endif %}
 
-  {% if watch %}
-  {{ h2("關注機型（" ~ watch|length ~ "）", "#0f766e") }}
-  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">不論有沒有新聞都會追蹤；每月回查一次。完整規格見附件 Excel「關注機型」工作表。</div>
-  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
-    <tr style="background:#e6f4f1;text-align:left;"><th>機型</th><th>螢幕</th><th>規格</th></tr>
-    {% for w in watch %}
-    <tr style="border-top:1px solid #e3e6ea;vertical-align:top;">
-      <td><b>{{ w.name }}</b>{% if w.updated %} <span style="font-size:11px;color:#1e7d4f;">● {{ period_label }}有更新</span>{% endif %}
-        {% if w.models %}<div style="font-size:11px;color:#999;">{{ w.models }}</div>{% endif %}</td>
-      <td>{% if w.status %}<span style="color:#999;">{{ w.status }}</span>{% else %}{{ w.screen }}{% endif %}</td>
-      <td style="white-space:nowrap;color:{% if w.score_pct >= 70 %}#1e7d4f{% elif w.score_pct >= 40 %}#8a6100{% else %}#999{% endif %};">{{ w.score }}</td>
-    </tr>
-    {% endfor %}
-  </table>
+  {% if watch_cmp and (watch_cmp.rows or watch_cmp.pending) %}
+  {{ h2("關注機型比較（" ~ (watch_cmp.rows|length) ~ " 款已建檔）", "#0f766e") }}
+  <div style="font-size:11px;color:#888;margin:-4px 0 8px;">不論有沒有新聞都會追蹤，每月回查；每款顯示資料最完整的選配，完整清單見 Excel。</div>
+  {% if watch_cmp.rows %}{{ cmp_table(watch_cmp.rows) }}{% endif %}
+  {% if watch_cmp.pending %}<div style="font-size:11px;color:#999;margin-top:6px;">尚未建檔：{% for p in watch_cmp.pending %}{{ p.name }}（{{ p.status }}）{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
   {% endif %}
 
   {% if platform %}
@@ -226,6 +252,12 @@
     {% endfor %}
   </table>
   {% endif %}
+  {% endif %}
+
+  {% if new_panels %}
+  {{ h2("新機詳細規格（" ~ new_panels|length ~ "）", "#64748b") }}
+  <div style="font-size:12px;color:#888;margin:-4px 0 8px;">{{ panel_known }} 款已知面板來源。🖥 螢幕　☀ 亮度　🎨 色域　◻ 表面處理　👆 觸控　🏭 面板廠與型號</div>
+  {% for c in new_panels %}{{ card(c) }}{% endfor %}
   {% endif %}
 
   {% if ongoing %}

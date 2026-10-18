@@ -681,7 +681,8 @@ def test_watch_report_section(db, tmp_path):
     assert rows["LG gram 17"]["updated"] and rows["LG gram 17"]["score"].startswith("2/")
     assert rows["Razer Blade 16"]["status"] == "排隊建檔中"
     import openpyxl
-    assert "關注機型" in openpyxl.load_workbook(xlsx).sheetnames and "關注機型（2）" in html
+    assert "關注機型" in openpyxl.load_workbook(xlsx).sheetnames and "關注機型比較（1 款已建檔）" in html
+    assert "Razer Blade 16（排隊建檔中）" in html and ctx["watch_cmp"]["rows"][0]["updated"]
 
 
 def test_panel_source_strict():
@@ -828,3 +829,40 @@ def test_backfill_run(db, monkeypatch, tmp_path):
     from display_intel.report import build_report
     ctx, html, _, _ = build_report(db, {**cfg, "schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}})
     assert ctx["new_panels"] == [] and ctx["backfill"]["added"] == 1
+
+
+
+def test_comparison_segments_and_best():
+    from display_intel.report import comparison, group_by_model, panel_card
+    cards = [panel_card(_rec("c1", 1, brand="HP", model="A", size_inch=14, refresh_hz=120, sdr_nits=400, dci_p3_pct=100)),
+             panel_card(_rec("c2", 1, brand="HP", model="A", size_inch=14, refresh_hz=60, sdr_nits=300)),
+             panel_card(_rec("c3", 1, brand="ASUS", model="B", size_inch=14, refresh_hz=120, sdr_nits=500, response_ms=0.2)),
+             panel_card(_rec("c4", 1, brand="MSI", model="C", size_inch=16, refresh_hz=240))]
+    segs = comparison(group_by_model(cards))
+    assert [s["name"] for s in segs] == ["14 吋級", "16 吋級"]
+    rows = segs[0]["rows"]
+    assert [r["label"] for r in rows] == ["ASUS B", "HP A", ""] and rows[2]["option"] == "選配 2"
+    best = {r["label"] or r["option"]: r["best"] for r in rows}
+    assert "sdr" in best["ASUS B"] and "refresh" in best["ASUS B"] and "refresh" in best["HP A"]
+    assert "p3" not in best["HP A"]  # 只有 1 個有效值不標
+    assert segs[1]["rows"][0]["best"] == set()
+
+
+
+def test_excel_compare_sheet(tmp_path):
+    import openpyxl
+    from display_intel.report import comparison, group_by_model, panel_card, write_compare_sheet
+    cards = [panel_card(_rec("x1", 1, brand="HP", model="A", size_inch=14, refresh_hz=120, sdr_nits=400, surface="anti-glare")),
+             panel_card(_rec("x2", 1, brand="ASUS", model="B", size_inch=14, refresh_hz=144, sdr_nits=500, response_ms=0.2))]
+    ctx = {"period_label": "本週", "compare_new": comparison(group_by_model(cards)), "watch_cmp": {"rows": [], "pending": [{"name": "LG gram 17", "status": "排隊建檔中"}]}}
+    wb = openpyxl.Workbook()
+    ws = write_compare_sheet(wb.active, ctx)
+    path = tmp_path / "c.xlsx"; wb.save(path)
+    ws = openpyxl.load_workbook(path)["比較表"]
+    assert ws["A1"].value == "基本" and ws["A2"].value == "機型" and ws.freeze_panes == "C3"
+    values = [[c.value for c in row] for row in ws.iter_rows(min_row=3)]
+    flat = [str(v) for row in values for v in row if v is not None]
+    assert any("14 吋級" in v for v in flat) and "AG" in flat and any("LG gram 17（排隊建檔中）" in v for v in flat)
+    asus = next(r for r in ws.iter_rows(min_row=3) if r[0].value == "ASUS B")
+    hz = [c for c in asus if c.value == 144][0]
+    assert hz.fill.fgColor.rgb.endswith("C6EFCE")
