@@ -1027,3 +1027,19 @@ def test_panel_ids_from_page_text(tmp_path):
     assert recs[14].spec.panel_model == "N140HCA-EAC" and recs[14].maker == "Innolux"
     assert recs[14].source_of("panel_model").conf == Confidence.B and "N140HCA-EAC" in recs[14].spec.evidence["panel_model"]
     assert derive.quote_in_text(recs[14].spec.evidence["panel_model"], page.content)
+
+
+def test_trend_bars_and_excel_chart(tmp_path):
+    import openpyxl
+    from display_intel.report import trend_bars, write_trend_charts
+    qt = {"dims": [{"name": "面板技術", "buckets": ["OLED", "LCD"], "shift": {},
+                    "rows": [{"quarter": "2026 Q3", "n": 10, "share": {"OLED": 0.4, "LCD": 0.5}},
+                             {"quarter": "2026 Q4", "n": 20, "share": {"OLED": 0.6, "LCD": 0.4}}]}]}
+    d = trend_bars(qt)["dims"][0]
+    assert [l["name"] for l in d["legend"]] == ["OLED", "LCD", "其他"]  # Q3 有 10% 其他
+    assert d["rows"][0]["segments"][-1] == {"name": "其他", "pct": 10.0, "color": "#c9c8c2", "ink": "#0b0b0b"}
+    assert d["rows"][0]["segments"][0]["color"] == d["rows"][1]["segments"][0]["color"]  # 顏色跟著類別走
+    wb = openpyxl.Workbook()
+    ws = write_trend_charts(wb.active, qt)
+    assert len(ws._charts) == 1 and ws["B3"].value == "OLED" and ws["B4"].value == 40.0
+    wb.save(tmp_path / "t.xlsx")

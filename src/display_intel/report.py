@@ -74,6 +74,36 @@ def provenance(rec: PanelRecord) -> list[dict]:
     return out
 
 
+# ---------- 季度趨勢圖（100% 堆疊橫條，用表格畫，Email 也能顯示）----------
+# 類別色固定順序（已驗證色盲可辨識）；顏色跟著類別走，不跟排名
+SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+OTHER_COLOR = "#c9c8c2"
+_DARK_INK = {"#1baf7a", "#eda100", "#e87ba4", OTHER_COLOR}  # 淺色底用深色字
+
+
+def trend_bars(qt: dict) -> dict:
+    """幫每個趨勢項目加上橫條分段（segments）與圖例（legend）。"""
+    for d in qt.get("dims", []):
+        colors = {b: SERIES_COLORS[i] for i, b in enumerate(d["buckets"][:len(SERIES_COLORS)])}
+        d["legend"] = [{"name": b, "color": c} for b, c in colors.items()]
+        has_other = False
+        for row in d["rows"]:
+            segs, total = [], 0.0
+            for b, c in colors.items():
+                share = row["share"].get(b) or 0
+                if share > 0:
+                    pct = round(share * 100, 1)
+                    total += pct
+                    segs.append({"name": b, "pct": pct, "color": c, "ink": "#0b0b0b" if c in _DARK_INK else "#ffffff"})
+            if row["n"] and total < 99.5:
+                has_other = True
+                segs.append({"name": "其他", "pct": round(100 - total, 1), "color": OTHER_COLOR, "ink": "#0b0b0b"})
+            row["segments"] = segs
+        if has_other:
+            d["legend"].append({"name": "其他", "color": OTHER_COLOR})
+    return qt
+
+
 VENDOR_ORDER = ["Intel", "NVIDIA", "AMD", "Qualcomm"]
 FAB_STATUS = {"planned": "規劃", "construction": "建廠", "equipment": "設備進駐", "trial": "試產",
               "mass_production": "量產", "shutdown": "停產", "other": "動態"}
@@ -301,7 +331,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
         "to_fill": analytics.to_fill(all_records, today),
         "platform_matrix": ihv.platform_matrix(all_records, today),
-        "quarterly": analytics.quarterly_trends(all_records),
+        "quarterly": trend_bars(analytics.quarterly_trends(all_records)),
         "backfill": backfill_status(db, cfg, backfilled),
         "watch": watch_rows(db, cfg, all_records, set(grouped)),
         "watch_cmp": watch_comparison(db, cfg, all_records, set(grouped)) if cfg.get("watchlist") else None,
@@ -501,6 +531,7 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
                                   d["shift"].get(b) if row is d["rows"][-1] else None])
         sheet(ws8, ["項目", "季度", "有標示的機型數", "分類", "款數", "占比 %", "季變化（百分點）"], rows8)
         ws8.auto_filter.ref = ws8.dimensions
+        write_trend_charts(wb.create_sheet("季度趨勢圖"), qt)
     ws6 = wb.create_sheet("平台適配")
     names = [i["name"] for i in ihv.evaluate(PanelSpec())]
     sheet(ws6, ["品牌", "機型", "螢幕", "處理器", "處理器平台", "顯示卡", "獨顯廠商", "顯示切換"] + names + ["說明"],
@@ -672,6 +703,53 @@ def watch_comparison(db: DB, cfg: dict, records: list[PanelRecord], updated_keys
     mark_best(rows)
     _stripe(rows)
     return {"rows": rows, "pending": pending}
+
+
+# ---------- Excel 季度趨勢圖 ----------
+
+def write_trend_charts(ws, qt: dict):
+    """每個趨勢項目一張 100% 堆疊橫條圖（Excel 原生圖表，可再編輯）。左邊是資料表，右邊是圖。"""
+    from openpyxl.chart import BarChart, Reference
+    ws["A1"] = "季度趨勢圖（各季新機規格占比 %；只計算有標示該規格的機型）"
+    ws["A1"].font = Font(bold=True, size=12)
+    row = 3
+    for d in qt.get("dims", []):
+        legend = d.get("legend") or [{"name": b, "color": SERIES_COLORS[i % len(SERIES_COLORS)]} for i, b in enumerate(d["buckets"])]
+        names = [l["name"] for l in legend]
+        ws.cell(row=row, column=1, value=d["name"]).font = Font(bold=True)
+        for j, n in enumerate(names, 2):
+            ws.cell(row=row, column=j, value=n).font = Font(bold=True)
+        for i, r in enumerate(d["rows"], 1):
+            ws.cell(row=row + i, column=1, value=f"{r['quarter']}（n={r['n']}）")
+            seg = {s["name"]: s["pct"] for s in r.get("segments", [])}
+            for j, n in enumerate(names, 2):
+                ws.cell(row=row + i, column=j, value=seg.get(n, 0))
+        n_rows = len(d["rows"])
+        chart = BarChart()
+        chart.type, chart.grouping, chart.overlap, chart.gapWidth = "bar", "percentStacked", 100, 60
+        chart.title = d["name"]
+        chart.y_axis.title = "占比 %"
+        chart.y_axis.majorGridlines = None
+        chart.x_axis.scaling.orientation = "maxMin"  # 季度由上而下依時間排列
+        chart.x_axis.delete = chart.y_axis.delete = False  # 新版 Excel 預設會隱藏 openpyxl 圖表的座標軸
+        chart.legend.position = "b"
+        chart.height, chart.width = 5.5 + 1.0 * n_rows, 16
+        data = Reference(ws, min_col=2, max_col=1 + len(names), min_row=row, max_row=row + n_rows)
+        cats = Reference(ws, min_col=1, min_row=row + 1, max_row=row + n_rows)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+        for s, l in zip(chart.series, legend):
+            s.graphicalProperties.solidFill = l["color"].lstrip("#")
+            s.graphicalProperties.line.solidFill = "FFFFFF"
+        ws.add_chart(chart, f"{get_column_letter(len(names) + 3)}{row}")
+        row += max(n_rows + 3, int(chart.height * 2) + 2)
+    ws.column_dimensions["A"].width = 18
+    for c in range(2, 10):
+        ws.column_dimensions[get_column_letter(c)].width = 14
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    return ws
 
 
 # ---------- Excel 比較表（第一個工作表） ----------

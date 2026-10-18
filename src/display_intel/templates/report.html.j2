@@ -216,7 +216,27 @@
     {% if not quarterly.comparable %}目前可比較的季度不足（每季需 5 款以上），季對季變化待資料累積後顯示。{% endif %}
   </div>
   {% for d in quarterly.dims %}
-  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e3e6ea;margin-bottom:8px;">
+  {#- 100% 堆疊橫條：每季一條；顏色跟著類別走，圖例在上，數字表在下 -#}
+  <div style="background:#fff;border:1px solid #e3e6ea;border-bottom:0;padding:8px 8px 4px;">
+    <div style="font-size:12.5px;font-weight:bold;color:#222;margin-bottom:4px;">{{ d.name }}</div>
+    <div style="font-size:11px;color:#52514e;line-height:1.9;">{% for l in d.legend %}<span style="white-space:nowrap;margin-right:10px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:{{ l.color }};vertical-align:-1px;margin-right:3px;"></span>{{ l.name }}</span>{% endfor %}</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:11px;margin-top:2px;">
+      {% for row in d.rows %}
+      <tr>
+        <td style="width:64px;white-space:nowrap;color:#52514e;padding:3px 6px 3px 0;">{{ row.quarter }}</td>
+        <td style="padding:3px 0;">
+          {% if row.segments %}
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;table-layout:fixed;"><tr>
+            {% for s in row.segments %}<td width="{{ s.pct }}%" title="{{ s.name }} {{ '%.0f'|format(s.pct) }}%" style="background:{{ s.color }};height:18px;border-right:2px solid #fff;{% if loop.first %}border-radius:4px 0 0 4px;{% endif %}{% if loop.last %}border-right:0;border-radius:0 4px 4px 0;{% endif %}color:{{ s.ink }};font-size:10px;text-align:center;overflow:hidden;white-space:nowrap;">{% if s.pct >= 14 %}{{ '%.0f'|format(s.pct) }}%{% endif %}</td>{% endfor %}
+          </tr></table>
+          {% else %}<span style="color:#999;">無資料</span>{% endif %}
+        </td>
+        <td style="width:38px;text-align:right;color:#999;padding-left:6px;white-space:nowrap;">n={{ row.n }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e3e6ea;margin-bottom:10px;">
     <tr style="background:#eef0f6;text-align:left;"><th>{{ d.name }}</th>{% for b in d.buckets %}<th style="text-align:right;">{{ b }}</th>{% endfor %}</tr>
     {% for row in d.rows %}
     <tr style="border-top:1px solid #e3e6ea;"><td style="white-space:nowrap;">{{ row.quarter }} <span style="color:#999;">n={{ row.n }}</span></td>
