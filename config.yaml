@@ -10,10 +10,12 @@ schedule:
   send_at: "22:00"          # 寄出時間（週報：每週日 22:00）
   collect_deadline: "21:35" # 蒐集與萃取最晚到這個時間收工，把資料交給報告階段
 
-# 蒐集排程：週一、三、五 19:17 輕量蒐集（不寄信），週日完整蒐集後寄週報
-# 每次蒐集後會自動「規格補完」：針對缺少規格的新機型，再搜尋官方規格頁與評測
+# 蒐集排程：週一、三、五 19:17 輕量蒐集（不寄信），週二專做規格補完，週日完整蒐集後寄週報
+# 規格補完：針對缺少規格的機型，再搜尋官方規格頁與評測。
+# Gemini 免費額度每天重置，週日完整蒐集會用掉大部分，所以大量補完放在週二用另一天的額度
 collection:
   full_day: sunday            # 哪一天做完整蒐集
+  enrich_day: tuesday         # 哪一天專做規格補完（不蒐集新聞）
   light:                      # 週一、三、五輕量蒐集
     lookback_hours: 50        # 回看約 2 天
     news_window: 2d           # Google 新聞搜尋範圍
@@ -27,13 +29,13 @@ collection:
     tavily_time_range: week
     tavily_queries_per_run: 42
     max_ai_calls: 60
-    enrich_models: 15
+    enrich_models: 3          # 週日額度留給新聞萃取，大量補完在週二
     extract_model: gemini-3.8-flash   # 週日用較準確的模型（不能用時自動改回上方預設模型）
   backfill:                   # 只做歷史回溯（手動執行用）
     max_ai_calls: 40
-  enrich:                     # 只做規格補完（手動執行用，應付臨時需求）
-    max_ai_calls: 40
-    enrich_models: 25
+  enrich:                     # 週二規格補完日（手動也可隨時執行，應付臨時需求）
+    max_ai_calls: 60
+    enrich_models: 30
   # 補完規則（目標：上市滿 30 天的機型規格完整度 75%）
   enrich_target: 10                   # 13 項重點規格中已知 10 項（約 75%）就不再補查，把額度留給其他機型
   enrich_schedule_days: [0, 14, 35]   # 補查時間：第一次立刻查，之後在上市第 14、35 天再查（配合評測出現）
@@ -272,7 +274,7 @@ report:
 
 # 週報最後的「系統健康與資料查核」（全部由程式檢查，不花 AI 與 Tavily 額度）
 health:
-  collect_weekdays: [0, 2, 4, 6]   # 預期蒐集的日子（0=週一 … 6=週日），沒跑會提醒
+  collect_weekdays: [0, 1, 2, 4, 6]   # 預期執行的日子（0=週一 … 6=週日；週二是規格補完），沒跑會提醒
   audit_samples: 5                 # 每週隨機抽幾款，列出數值＋原文給你人工核對
   # 確認過「不是同一款、分開列」的機型名稱（健康檢查不再提醒可能重複）
   not_duplicates:

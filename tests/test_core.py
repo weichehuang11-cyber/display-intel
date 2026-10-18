@@ -468,7 +468,9 @@ def test_profiles_schedule():
     apply_profile(cfg, datetime(2026, 10, 14, 19, 17, tzinfo=tz))  # 週三
     assert cfg["run"]["profile"] == "light" and cfg["run"]["tavily_days"] == 2 and len(cfg["run"]["tavily_queries"]) == 10
     apply_profile(cfg, datetime(2026, 10, 18, 19, 17, tzinfo=tz))  # 週日
-    assert cfg["run"]["profile"] == "full" and cfg["run"]["extract_model"] and cfg["run"]["enrich_models"] == 15
+    assert cfg["run"]["profile"] == "full" and cfg["run"]["extract_model"] and cfg["run"]["enrich_models"] == 3
+    apply_profile(cfg, datetime(2026, 10, 20, 19, 17, tzinfo=tz))  # 週二：規格補完日
+    assert cfg["run"]["profile"] == "enrich" and cfg["run"]["enrich_models"] == 30 and cfg["run"]["collect_news"] is False
     apply_profile(cfg, profile="enrich")
     assert cfg["run"]["collect_news"] is False and cfg["run"]["tavily_queries"] == []
 

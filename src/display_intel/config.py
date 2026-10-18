@@ -56,7 +56,7 @@ def _rotate(items: list, n: int, offset: int) -> list:
 def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
     """決定這次執行用平日輕量（light）或週日完整（full）設定，結果放在 cfg["run"]。
 
-    profile 未指定時：collection.full_day 那天用 full，其他天用 light。
+    profile 未指定時：collection.full_day 那天用 full，enrich_day 那天只做規格補完，其他天用 light。
     展會月（collection.event_months）會額外加查詢。
     """
     from datetime import datetime
@@ -67,7 +67,13 @@ def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
     col = cfg.get("collection") or {}
     if profile in (None, "", "auto"):
         full_day = WEEKDAYS.index(str(col.get("full_day", "sunday")).lower())
-        profile = "full" if now.weekday() == full_day else "light"
+        enrich_day = col.get("enrich_day")
+        if now.weekday() == full_day:
+            profile = "full"
+        elif enrich_day and now.weekday() == WEEKDAYS.index(str(enrich_day).lower()):
+            profile = "enrich"
+        else:
+            profile = "light"
     p = dict(col.get(profile) or {})
     tv = cfg.get("sources", {}).get("tavily") or {}
     day = now.date().toordinal()

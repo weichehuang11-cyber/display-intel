@@ -30,7 +30,7 @@ __main__.py 總控：collect / report / run / check-sources / test-email / demo
 demo.py     虛構範例資料，不需金鑰即可產生報告
 ```
 
-排程（`.github/workflows/`）：`collect.yml` 週一、三、五、日 19:17 台灣時間（一三五 light、週日 full、手動可選 enrich，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
+排程（`.github/workflows/`）：`collect.yml` 週一、二、三、五、日 19:17 台灣時間（一三五 light、週二 enrich（collection.enrich_day，避開週日 AI 額度）、週日 full、手動可選 enrich，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
 
 ## 核心規則（修改時務必維持）
 

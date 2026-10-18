@@ -78,11 +78,12 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 | 台灣時間 | 動作 |
 | --- | --- |
 | 週一、三、五 19:17 | 輕量蒐集最近 2 天的新聞、AI 萃取規格，再補查 6 款缺規格的機型（不寄信） |
-| 週日 19:17 | 完整蒐集過去 7 天的新聞，補查 15 款機型（最晚 21:35 收工） |
+| 週二 19:17 | **規格補完日**：不蒐集新聞，用整天的 AI 額度補查最多 30 款缺規格的機型 |
+| 週日 19:17 | 完整蒐集過去 7 天的新聞，補查 3 款機型（最晚 21:35 收工） |
 | 週日 21:17 | 產生週報，等待到 22:00 |
 | 週日 22:00 | 寄出週報 |
 
-分散在一週中蒐集的好處：AI 免費額度每天重置，分散執行可以處理更多文章；只保留幾天的新聞也比較不會漏掉。展會月（1 月 CES、5–6 月 Computex、9 月 IFA）會自動多搜尋一些。
+分散在一週中蒐集的好處：AI 免費額度每天重置，分散執行可以處理更多文章（週日完整蒐集會用掉當天大部分額度，所以大量補完放在週二）；只保留幾天的新聞也比較不會漏掉。展會月（1 月 CES、5–6 月 Computex、9 月 IFA）會自動多搜尋一些。
 
 **規格補完**（目標：上市滿 30 天的機型完整度 75%）：新聞稿常只寫一部分規格，面板廠、面板型號、反應時間、調光方式通常要等深度評測才公開。每次蒐集後，系統會挑出完整度未達 10/13 的機型：
 
@@ -188,7 +189,7 @@ Tavily 用到 850 次時會自動暫停補完，保留至少 150 次給臨時需
 | 想做的事 | 操作 | 約用 Tavily |
 | --- | --- | --- |
 | 有大型發表會，想立刻蒐集 | 「1. 定期蒐集」→ Run workflow → profile 選 `full` | 55 次 |
-| 只想補齊既有機型的規格 | profile 選 `enrich` | 每款約 2–3 次，最多 25 款 |
+| 只想補齊既有機型的規格 | profile 選 `enrich` | 每款約 2–3 次，最多 30 款 |
 | 想立刻收到最新報告 | 「2. 每週報告」→ mode 選 `now` | 0 次 |
 
 > GitHub 的免費排程在尖峰時段偶爾會延遲 10–30 分鐘，所以報告階段提早啟動預留緩衝。
@@ -205,7 +206,7 @@ Tavily 用到 850 次時會自動暫停補完，保留至少 150 次給臨時需
 | 新增搜尋關鍵字 | `google_news:` → `queries:` |
 | 讓更多文章被收進來 | `keywords:` 底下加詞 |
 | 改寄送時間 | `schedule:` → `send_at`（也要同步改 `.github/workflows/report.yml` 的 cron） |
-| 調整搜尋量 | `collection:` 底下 `light`（週一三五）與 `full`（週日）的 `tavily_queries_per_run`、`enrich_models`、`max_ai_calls` |
+| 調整搜尋量 | `collection:` 底下 `light`（週一三五）、`enrich`（週二）與 `full`（週日）的 `tavily_queries_per_run`、`enrich_models`、`max_ai_calls` |
 | 新增或刪除關注機型 | `watchlist:` 清單；每次建檔數量與回查頻率在 `collection:` 的 `watch_per_run`、`watch_refresh_days` |
 | 調整補查規則 | `collection:` 的 `enrich_target`（幾項就停）、`enrich_schedule_days`（回訪時間）、`enrich_monthly_cap`（月用量上限） |
 | 調整展會月 | `collection:` 的 `event_months` 與 `event_extra_queries_per_run` |
