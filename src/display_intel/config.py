@@ -73,14 +73,14 @@ def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
     day = now.date().toordinal()
     queries = tv.get("queries", [])
     n = p.get("tavily_queries_per_run", tv.get("max_queries_per_run", 20))
-    if profile == "enrich":
-        chosen = []  # 只做規格補完，不搜尋新聞
+    if profile in ("enrich", "backfill"):
+        chosen = []  # 只做規格補完或回溯，不搜尋本週新聞
     elif profile == "full":
         chosen = list(queries)[:n]
     else:
         chosen = _rotate(queries, n, day)
     event = now.month in col.get("event_months", [])
-    if event and profile != "enrich":
+    if event and profile not in ("enrich", "backfill"):
         chosen += _rotate(tv.get("event_queries", []), col.get("event_extra_queries_per_run", 0), day)
     weekly = cfg.get("schedule", {}).get("cadence", "daily") == "weekly"
     cfg["run"] = {
@@ -94,6 +94,6 @@ def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
         "max_ai_calls": p.get("max_ai_calls", cfg.get("llm", {}).get("max_calls_per_run", 40)),
         "enrich_models": p.get("enrich_models", 0),
         "extract_model": p.get("extract_model"),
-        "collect_news": profile != "enrich",
+        "collect_news": profile not in ("enrich", "backfill"),
     }
     return cfg

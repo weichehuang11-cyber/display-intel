@@ -29,6 +29,8 @@ collection:
     max_ai_calls: 60
     enrich_models: 15
     extract_model: gemini-3.8-flash   # 週日用較準確的模型（不能用時自動改回上方預設模型）
+  backfill:                   # 只做歷史回溯（手動執行用）
+    max_ai_calls: 40
   enrich:                     # 只做規格補完（手動執行用，應付臨時需求）
     max_ai_calls: 40
     enrich_models: 25
@@ -179,6 +181,39 @@ sources:
       - "AIO PC announced display"
       - "notebook panel showcase OLED"
       - "展會 筆電 螢幕"
+
+# 歷史回溯：補建過去幾季的新機資料，讓季度趨勢可以比較
+# start_on 之後每次蒐集順便做一點；也可手動執行（profile 選 backfill）立刻開始
+backfill:
+  enabled: true
+  start_on: "2026-11-01"
+  quarters: ["2026 Q3", "2026 Q2", "2026 Q1", "2025 Q4"]   # 由近到遠處理
+  tavily_per_run: 12            # 每次最多用幾次 Tavily
+  monthly_tavily_budget: 160    # 回溯每月最多用幾次 Tavily（另受全體月上限保護）
+  units_per_run: 30
+  max_results: 15
+  events: {1: CES, 2: Computex, 3: IFA}   # 各季的大展（第 4 季沒有就留空）
+  tavily_queries:
+    - "{event} laptop OLED display"
+    - "{event} gaming laptop display 240Hz"
+    - "{event} new laptops screen specs"
+    - "new laptop announced display specs"
+    - "laptop OLED display announced"
+    - "laptop Mini LED display announced"
+    - "laptop review display panel measured"
+    - "ASUS Zenbook ROG laptop display announced"
+    - "Lenovo Yoga ThinkPad Legion display announced"
+    - "HP OmniBook OMEN EliteBook display announced"
+    - "Dell XPS Alienware display announced"
+    - "Acer MSI Razer laptop display announced"
+    - "Apple MacBook LG gram Samsung Galaxy Book display"
+    - "笔记本 新品 发布 屏幕 OLED"
+    - "机械革命 新品 屏幕"
+  google_news_queries:            # 免費，只有摘要
+    - {q: "laptop OLED display", lang: en, hl: en-US, gl: US, ceid: "US:en"}
+    - {q: "laptop display panel", lang: en, hl: en-US, gl: US, ceid: "US:en"}
+    - {q: "筆電 螢幕 面板", lang: zh-TW, hl: zh-TW, gl: TW, ceid: "TW:zh-Hant"}
+    - {q: "笔记本 屏幕", lang: zh-CN, hl: zh-CN, gl: CN, ceid: "CN:zh-Hans"}
 
 # 關注機型清單：不論這週有沒有新聞，都會主動建立並追蹤完整規格
 # 格式：品牌（brand）＋ 機型系列（model）；aliases 是其他寫法；lang: zh 代表用中文搜尋

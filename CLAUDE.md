@@ -21,6 +21,7 @@ report.py   未報告事件 → HTML Email（templates/report.html.j2，卡片�
 analytics.py 規格完整度（13 項重點欄位，含觸控）、關鍵數字、亮點、週對週、技術提及率、品牌×面板廠、傳聞追蹤、名詞辭典（全部程式計算，不經 AI）
 enrich.py   規格補完（以機型為單位）：完整度未達 enrich_target 的機型，依 enrich_schedule_days 回訪；每次評測網站＋官方規格各搜尋一次 → focus 萃取 → 合併；有面板型號時反查面板原廠規格（只填空白，記在 panel_spec_fields）；Tavily 月用量記在 db.usage，達 enrich_monthly_cap 停止
             關注機型（watchlist）：watch_due 依 watch_state 表排程 → search_watch（中文機型用中文查詢）→ focus 萃取 → ingest(tag="watch")；報告中 watch 建檔的 new 事件不算新機
+backfill.py 歷史回溯：季度×查詢單位（backfill_state 表），Tavily start/end_date＋Google 新聞 after:/before:，ingest(tag="backfill")；報告中 backfill 事件不進本期卡片，只進季度趨勢；announced 取最早新聞日期
 ihv.py      平台適配性：cpu/gpu 廠商推算、五項評比（✓/✗/?/—，未知不等於不支援）、平台 × 面板對照表
 panel_decode.py 面板型號前綴 → 面板廠與尺寸（標示「推算」）、面板廠名稱統一
 mailer.py   Gmail SMTP（應用程式密碼）

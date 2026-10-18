@@ -759,3 +759,72 @@ def test_surface_code_and_card():
                         dci_p3_pct=100, adobe_rgb_pct=89, ntsc_pct=72))
     assert c["surface"] == "AGLR（抗眩光低反射）" and "反應時間 3ms" in c["screen"]
     assert c["gamut"] == "DCI-P3 100%・Adobe RGB 89%・NTSC 72%"
+
+
+def test_advanced_fields_card():
+    from display_intel import derive
+    from display_intel.report import panel_card
+    c = panel_card(_rec("adv", 1, brand="Dell", model="XPS 14", reflectance_pct=1.5, haze_pct=25, viewing_angle="178°",
+                        backplane="LTPO", color_depth_desc="10-bit", touch_structure="On-cell", bezel="側 3.5mm",
+                        screen_to_body_pct=92, panel_thickness_mm=1.2, camera_cutout="上邊框", edp_version="eDP 1.5",
+                        vrr_min_hz=1, panel_power_w=2.1))
+    assert c["optics"] == "反射率 1.5%・霧度 25%・可視角 178°"
+    assert c["structure"] == "LTPO・10-bit・觸控 On-cell"
+    assert c["mechanics"] == "邊框 側 3.5mm・屏佔比 92%・面板厚 1.2mm・鏡頭 上邊框"
+    assert c["interface"] == "eDP 1.5・VRR 最低 1Hz・面板功耗 2.1W"
+    bad = PanelSpec(brand="X", model="Y", reflectance_pct=40, panel_power_w=200)
+    assert {"reflectance_pct", "panel_power_w"} <= set(derive.plausibility_issues(bad))
+
+
+# ---------- 回溯 ----------
+
+def test_backfill_units_and_window():
+    from datetime import date
+    from display_intel import backfill
+    assert backfill.quarter_window("2026 Q1") == (date(2026, 1, 1), date(2026, 3, 31))
+    assert backfill.quarter_window("2025 Q4") == (date(2025, 10, 1), date(2025, 12, 31))
+    cfg = {"backfill": {"enabled": True, "start_on": "2026-11-01", "quarters": ["2026 Q1", "2025 Q4"], "events": {1: "CES"},
+                        "tavily_queries": ["{event} laptop OLED", "laptop display"],
+                        "google_news_queries": [{"q": "laptop OLED", "lang": "en"}]}}
+    us = backfill.units(cfg)
+    assert [u["query"] for u in us if u["kind"] == "tavily"] == ["CES laptop OLED", "laptop display", "laptop display"]
+    assert len(us) == 5
+    assert not backfill.due(cfg, date(2026, 10, 18)) and backfill.due(cfg, date(2026, 11, 1))
+
+
+def test_backfill_run(db, monkeypatch, tmp_path):
+    import httpx
+    from display_intel import backfill
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-fake")
+    body = "The Acme Nova 14 laptop has a 14-inch OLED display with 120Hz refresh rate and anti-glare coating. " * 3
+    seen = []
+
+    def handler(req):
+        if "tavily" in str(req.url):
+            import json as _j
+            seen.append(_j.loads(req.content))
+            return httpx.Response(200, json={"results": [{"url": "https://news.example/acme-nova-14", "title": "Acme Nova 14 laptop OLED display",
+                                                          "content": body, "raw_content": body, "published_date": "2026-01-08"}]})
+        return httpx.Response(200, text="<rss><channel></channel></rss>")
+
+    real = httpx.Client
+    monkeypatch.setattr(backfill.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler)))
+    reply = {"results": [{"article_id": 1, "relevant": True, "panels": [
+        {"brand": "Acme", "model": "Nova 14", "size_inch": 14, "panel_tech": "OLED", "refresh_hz": 120, "surface": "anti-glare",
+         "evidence": {"size_inch": "14-inch", "panel_tech": "OLED display", "refresh_hz": "120Hz", "surface": "anti-glare"}}]}]}
+    cfg = {"backfill": {"enabled": True, "start_on": "2099-01-01", "quarters": ["2026 Q1"], "tavily_per_run": 5,
+                        "tavily_queries": ["laptop OLED"], "google_news_queries": [{"q": "laptop OLED", "lang": "en"}]},
+           "collection": {}, "keywords": KEYWORDS, "llm": {"max_chars_per_call": 50000, "max_chars_per_article": 3000}}
+    assert backfill.run(db, cfg, FakeLLM([]))["stopped"].startswith("尚未到開始日期")
+    st = backfill.run(db, cfg, FakeLLM([reply]), force=True)
+    assert seen[0]["start_date"] == "2026-01-01" and seen[0]["end_date"] == "2026-03-31"
+    assert st["tavily"] == 1 and st["ingest"]["panel_new"] == 1 and st["progress"]["done"] == 2
+    rec = db.all_panels()[0]
+    from display_intel import analytics
+    assert analytics.quarter_of(rec) == "2026 Q1"
+    assert db.usage("tavily_backfill") == 1
+    assert backfill.run(db, cfg, FakeLLM([]), force=True)["stopped"] == "回溯已全部完成"
+    # 回溯資料不會出現在本期新機卡片
+    from display_intel.report import build_report
+    ctx, html, _, _ = build_report(db, {**cfg, "schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}})
+    assert ctx["new_panels"] == [] and ctx["backfill"]["added"] == 1

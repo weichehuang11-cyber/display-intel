@@ -30,7 +30,10 @@ FIELD_LABELS = {
     "hdr_formats": "HDR 格式", "certifications": "認證", "refresh_hz": "刷新率", "vrr_range": "VRR 範圍",
     "response_ms": "反應時間", "vrr_tech": "VRR 技術", "backlight": "背光", "mini_led_zones": "Mini LED 分區",
     "dimming": "調光", "pwm_hz": "PWM 頻率", "low_power_tech": "節能技術", "eye_care": "護眼",
-    "ntsc_pct": "NTSC", "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
+    "ntsc_pct": "NTSC", "reflectance_pct": "反射率 %", "haze_pct": "霧度 %", "uniformity_pct": "亮度均勻度 %",
+    "viewing_angle": "可視角", "backplane": "背板", "color_depth_desc": "色深（原文）", "touch_structure": "觸控結構",
+    "bezel": "邊框", "panel_thickness_mm": "面板厚度 mm", "camera_cutout": "鏡頭位置", "edp_version": "eDP 版本",
+    "vrr_min_hz": "VRR 最低 Hz", "panel_power_w": "面板功耗 W", "touch": "觸控", "stylus": "觸控筆", "glass": "玻璃", "screen_to_body_pct": "屏佔比", "form_factor": "形態",
     "cpu_platform": "處理器", "gpu": "顯示卡", "gpu_switching": "顯示切換", "platform_certifications": "平台認證",
     "display_power_tech": "平台顯示節能",
 }
@@ -95,6 +98,16 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         _fmt(s.vrr_tech), f"Mini LED {s.mini_led_zones} 區" if s.mini_led_zones else "",
         f"{s.dimming} 調光" if s.dimming else "", f"PWM {s.pwm_hz:g}Hz" if s.pwm_hz else "",
         _fmt(s.low_power_tech), _fmt(s.display_power_tech), _fmt(s.certifications), _fmt(s.hdr_formats)] if x)
+    def g(*parts):
+        return "・".join(x for x in parts if x)
+    optics = g(f"反射率 {s.reflectance_pct:g}%" if s.reflectance_pct else "", f"霧度 {s.haze_pct:g}%" if s.haze_pct else "",
+               f"均勻度 {s.uniformity_pct:g}%" if s.uniformity_pct else "", f"可視角 {s.viewing_angle}" if s.viewing_angle else "")
+    structure = g(s.backplane or "", s.color_depth_desc or "", f"觸控 {s.touch_structure}" if s.touch_structure else "",
+                  f"蓋板 {s.glass}" if s.glass else "")
+    mechanics = g(f"邊框 {s.bezel}" if s.bezel else "", f"屏佔比 {s.screen_to_body_pct:g}%" if s.screen_to_body_pct else "",
+                  f"面板厚 {s.panel_thickness_mm:g}mm" if s.panel_thickness_mm else "", f"鏡頭 {s.camera_cutout}" if s.camera_cutout else "")
+    interface = g(s.edp_version or "", f"VRR 最低 {s.vrr_min_hz:g}Hz" if s.vrr_min_hz else "",
+                  f"面板功耗 {s.panel_power_w:g}W" if s.panel_power_w else "")
     if s.touch is True:
         touch = "支援觸控" + (f"・觸控筆 {s.stylus}" if s.stylus else "")
     elif s.touch is False:
@@ -111,6 +124,7 @@ def panel_card(rec: PanelRecord, changes: dict | None = None, tags: list[str] | 
         "score": f"{known}/{total}", "score_pct": round(known / total * 100), "missing": "、".join(analytics.missing_fields(rec)),
         "key": rec.key, "rec": rec, "brand": s.brand or "", "model": s.model or "",
         "screen": screen, "bright": bright, "gamut": gamut, "surface": surface, "touch": touch,
+        "optics": optics, "structure": structure, "mechanics": mechanics, "interface": interface,
         "platform": ihv.platform_text(s), "ihv": ihv.evaluate(s), "panel": panel or "面板來源待確認", "panel_known": bool(panel),
         "extras": extras, "derived": derived, "tags": tags or [],
         "confidence": rec.confidence.label, "conf_code": rec.confidence.value,
@@ -165,6 +179,15 @@ def watch_rows(db: DB, cfg: dict, records: list[PanelRecord], updated_keys: set[
     return rows
 
 
+def backfill_status(db: DB, cfg: dict, added: int) -> dict | None:
+    from . import backfill
+    if not (cfg.get("backfill") or {}).get("enabled"):
+        return None
+    p = backfill.progress(db, cfg)
+    return {"added": added, "quarters": p["quarters"], "done": p["done"], "total": p["total"],
+            "start_on": cfg["backfill"].get("start_on")}
+
+
 def ctx_label(weekly: bool) -> str:
     return "本週" if weekly else "今日"
 
@@ -178,12 +201,16 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
     grouped: dict[str, dict] = {}
     for e in (e for e in events if e["category"] == "panel"):
         rec = _current_record(db, e)
-        g = grouped.setdefault(rec.key, {"rec": rec, "kind": e["kind"], "changes": {}, "watch_seed": False})
+        g = grouped.setdefault(rec.key, {"rec": rec, "kind": e["kind"], "changes": {}, "watch_seed": False, "backfill": False})
         if priority.get(e["kind"], 0) > priority.get(g["kind"], 0):
             g["kind"] = e["kind"]
+        if e["payload"].get("tag") == "backfill":
+            g["backfill"] = True  # 回溯的歷史資料：只進季度趨勢與 Excel，不出現在本期卡片
         if e["kind"] == "new" and e["payload"].get("tag") == "watch":
             g["watch_seed"] = True  # 關注清單主動建檔的既有機型，不算本期新機
         g["changes"].update(e["payload"].get("changes") or {})
+    backfilled = sum(1 for g in grouped.values() if g["backfill"])
+    grouped = {k: g for k, g in grouped.items() if not g["backfill"]}
     all_records = db.all_panels()
     period_new = [{"rec": g["rec"]} for g in grouped.values()
                   if g["kind"] == "new" and not g["watch_seed"] and g["rec"].confidence != Confidence.D]
@@ -238,6 +265,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "to_fill": analytics.to_fill(all_records, today),
         "platform_matrix": ihv.platform_matrix(all_records, today),
         "quarterly": analytics.quarterly_trends(all_records),
+        "backfill": backfill_status(db, cfg, backfilled),
         "watch": watch_rows(db, cfg, all_records, set(grouped)),
     }
     # 卡片依機型合併（螢幕選配列在同一張卡片內）

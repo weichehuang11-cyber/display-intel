@@ -45,7 +45,9 @@ REVIEW_DOMAINS = ["notebookcheck.net", "notebookcheck.org", "notebookcheck.com",
 REVIEW_HINTS = ("notebookcheck", "review", "rtings", "laptopmedia", "tomshardware", "pcmag", "評測", "评测", "レビュー")
 # 面板原廠規格可以補的欄位（只填空白，不覆蓋整機資料）
 PANEL_SPEC_FIELDS = ["panel_maker", "panel_tech", "sdr_nits", "hdr_peak_nits", "contrast", "srgb_pct", "dci_p3_pct",
-                     "adobe_rgb_pct", "color_depth_bit", "response_ms", "surface"]
+                     "adobe_rgb_pct", "ntsc_pct", "color_depth_bit", "color_depth_desc", "response_ms", "surface",
+                     "viewing_angle", "backplane", "haze_pct", "touch_structure", "panel_thickness_mm",
+                     "edp_version", "panel_power_w"]
 
 
 def source_type_for(url: str, title: str, brand: str | None) -> str:
@@ -163,8 +165,10 @@ def search_specs(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -
 
 PANEL_PROMPT = """你是顯示器面板規格分析師。從文章中找出面板「{model}」的原廠規格，只輸出 JSON：
 {{"panel": {{"panel_maker": "", "panel_tech": "", "sdr_nits": 數字, "hdr_peak_nits": 數字, "contrast": "",
-"srgb_pct": 數字, "dci_p3_pct": 數字, "adobe_rgb_pct": 數字, "color_depth_bit": 數字, "response_ms": 數字,
-"surface": "", "evidence": {{"欄位名": "逐字複製自文章的片段"}}}}}}
+"srgb_pct": 數字, "dci_p3_pct": 數字, "adobe_rgb_pct": 數字, "ntsc_pct": 數字, "color_depth_bit": 數字,
+"color_depth_desc": "", "response_ms": 數字, "surface": "", "viewing_angle": "", "backplane": "", "haze_pct": 數字,
+"touch_structure": "", "panel_thickness_mm": 數字, "edp_version": "", "panel_power_w": 數字,
+"evidence": {{"欄位名": "逐字複製自文章的片段"}}}}}}
 規則：只寫文章中屬於這片面板的數值，沒有就省略；每個欄位都要附 evidence；找不到這片面板就回傳 {{"panel": null}}。"""
 
 

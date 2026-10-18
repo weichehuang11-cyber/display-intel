@@ -108,6 +108,23 @@ class PanelSpec(BaseModel):
     glass: Optional[str] = None
     screen_to_body_pct: Optional[float] = None
     form_factor: Optional[str] = Field(None, description="一般 / 可折疊 / 雙螢幕 / 翻轉")
+    # 光學
+    reflectance_pct: Optional[float] = Field(None, description="表面反射率 %")
+    haze_pct: Optional[float] = Field(None, description="霧度 haze %")
+    uniformity_pct: Optional[float] = Field(None, description="亮度均勻度 %")
+    viewing_angle: Optional[str] = Field(None, description="可視角，例如 178°/178°")
+    # 面板結構
+    backplane: Optional[str] = Field(None, description="背板技術：a-Si / Oxide / LTPS / LTPO")
+    color_depth_desc: Optional[str] = Field(None, description="色深原文，例如 10-bit、8-bit+FRC、6-bit+FRC")
+    touch_structure: Optional[str] = Field(None, description="觸控結構：On-cell / In-cell / OGS / GFF 等")
+    # 機構
+    bezel: Optional[str] = Field(None, description="邊框寬度原文，例如 上 4.9mm／側 3.5mm")
+    panel_thickness_mm: Optional[float] = Field(None, description="面板厚度 mm")
+    camera_cutout: Optional[str] = Field(None, description="鏡頭位置：上邊框 / 凹口 notch / 開孔 punch-hole / 隱藏式")
+    # 介面與功耗
+    edp_version: Optional[str] = Field(None, description="eDP 版本，例如 eDP 1.4b、eDP 1.5")
+    vrr_min_hz: Optional[float] = Field(None, description="可變刷新率最低值 Hz")
+    panel_power_w: Optional[float] = Field(None, description="面板功耗 W")
     launch_period: Optional[str] = Field(None, description="發表或上市時間，例如 2026-01 或 2026 Q1（文章明確寫才填）")
     # 平台（與 Intel / NVIDIA / AMD / Qualcomm 的搭配）
     cpu_platform: Optional[str] = Field(None, description="處理器，例如 Intel Core Ultra 7 258V、AMD Ryzen AI 9 HX 370")

@@ -133,6 +133,10 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
         db.put_panel(rec)
         return PanelEvent(kind="new", record=rec)
 
+    # 發表時間取最早的新聞日期（回溯找到較早的報導時往前修正；文章明寫的 launch_period 另外優先）
+    if use_article_date and article.published and (existing.announced is None or article.published < existing.announced):
+        existing.announced = article.published
+        db.put_panel(existing)
     old = existing.spec.model_dump()
     new = spec.model_dump()
     changes: dict[str, list] = {}

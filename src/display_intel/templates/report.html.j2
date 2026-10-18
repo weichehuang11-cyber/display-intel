@@ -18,6 +18,14 @@
     <div style="font-size:14px;line-height:1.6;{% if not o.gamut %}color:#999;{% endif %}">🎨 {{ o.gamut or "色域：未標示" }}</div>
     <div style="font-size:14px;line-height:1.6;{% if not o.surface %}color:#999;{% endif %}">◻ {{ ("表面：" ~ o.surface) if o.surface else "表面處理：未標示" }}</div>
     <div style="font-size:14px;line-height:1.6;{% if not o.touch %}color:#999;{% endif %}">👆 {{ o.touch or "觸控：未標示" }}</div>
+    {% if o.optics or o.structure or o.mechanics or o.interface %}
+    <div style="font-size:12px;line-height:1.7;color:#555;margin-top:2px;">
+      {% if o.optics %}<div>光學｜{{ o.optics }}</div>{% endif %}
+      {% if o.structure %}<div>結構｜{{ o.structure }}</div>{% endif %}
+      {% if o.mechanics %}<div>機構｜{{ o.mechanics }}</div>{% endif %}
+      {% if o.interface %}<div>介面｜{{ o.interface }}</div>{% endif %}
+    </div>
+    {% endif %}
     <div style="font-size:14px;line-height:1.6;{% if not o.panel_known %}color:#999;{% endif %}">🏭 {{ o.panel }}</div>
     {% if o.extras %}<div style="font-size:13px;line-height:1.6;color:#555;">{{ o.extras }}</div>{% endif %}
     {% if o.derived %}<div style="font-size:12px;line-height:1.6;color:#888;">{{ o.derived }}</div>{% endif %}
@@ -191,6 +199,7 @@
     {% endif %}
   </table>
   {% endfor %}
+  {% if backfill %}<div style="font-size:11px;color:#999;margin-top:2px;">歷史回溯進度：{% for q, v in backfill.quarters.items() %}{{ q }} {{ v }}{% if not loop.last %}、{% endif %}{% endfor %}{% if backfill.added %}；{{ period_label }}回溯補進 {{ backfill.added }} 款（不列入上方新機）{% endif %}{% if backfill.done == 0 %}；{{ backfill.start_on }} 起自動執行{% endif %}。</div>{% endif %}
   <div style="font-size:11px;color:#999;margin-top:2px;">占比只計算有標示該規格的機型；季變化單位為百分點。季度依發表／上市時間判斷，沒寫則用新聞日期；關注清單的既有機型若無時間不計入。</div>
   {% endif %}
 

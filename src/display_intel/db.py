@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_reported ON events(reported_at);
 CREATE INDEX IF NOT EXISTS idx_events_dedup ON events(dedup_key);
+CREATE TABLE IF NOT EXISTS backfill_state (
+    unit TEXT PRIMARY KEY, done_at TEXT, results INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS watch_state (
     name TEXT PRIMARY KEY, last_checked TEXT, found INTEGER DEFAULT 0
 );
@@ -110,6 +113,13 @@ class DB:
     def mark_reported(self, ids: list[int]):
         now = utcnow().isoformat()
         self.conn.executemany("UPDATE events SET reported_at = ? WHERE id = ?", [(now, i) for i in ids])
+
+    # ---------- 回溯 ----------
+    def backfill_done(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT unit FROM backfill_state")}
+
+    def mark_backfill_done(self, unit: str, results: int):
+        self.conn.execute("INSERT OR REPLACE INTO backfill_state VALUES (?,?,?)", (unit, utcnow().isoformat(), results))
 
     # ---------- 關注機型 ----------
     def watch_last_checked(self, name: str):

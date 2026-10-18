@@ -92,6 +92,15 @@ def cmd_collect(cfg: dict, args) -> int:
                 db.add_article(a.url, a.title, a.source)
             db.add_usage("tavily", run.get("tavily_used", 0))
 
+        # 歷史回溯：11/1 起每次順便做一點；手動選 backfill 時立刻執行
+        from . import backfill
+        if run["profile"] == "backfill" or backfill.due(cfg):
+            try:
+                stats["backfill"] = backfill.run(db, cfg, llm, should_stop, force=run["profile"] == "backfill")
+            except Exception as exc:
+                log.exception("回溯失敗（不影響已完成的蒐集）")
+                stats["backfill"] = {"error": f"{type(exc).__name__}：{exc}"}
+
         # 規格補完：用剩下的 AI 額度補查缺少規格的機型
         if run.get("enrich_models"):
             from .enrich import enrich
@@ -145,7 +154,7 @@ def _print_stats(stats: dict):
         log.info("來源統計：共 %d 個，%d 個今天沒抓到文章%s", len(src), len(zero), f"（{', '.join(zero[:8])}）" if zero else "")
     for name, err in stats.get("source_errors", {}).items():
         log.info("來源失敗：%s → %s", name, err)
-    for k in ("profile", "llm_probe", "after_keyword_filter", "after_dedupe", "extract", "ingest", "enrich"):
+    for k in ("profile", "llm_probe", "after_keyword_filter", "after_dedupe", "extract", "ingest", "backfill", "enrich"):
         if k in stats:
             log.info("%s：%s", k, stats[k])
 
@@ -239,8 +248,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=None)
     p.add_argument("--dry-run", action="store_true", help="不寄信，只產生報告檔案")
     p.add_argument("--no-wait", action="store_true", help="不等到寄送時間，立刻寄出")
-    p.add_argument("--profile", choices=["auto", "light", "full", "enrich"], default="auto",
-                   help="蒐集模式：auto 依星期自動；light 輕量；full 完整；enrich 只補查缺少的規格")
+    p.add_argument("--profile", choices=["auto", "light", "full", "enrich", "backfill"], default="auto",
+                   help="蒐集模式：auto 依星期自動；light 輕量；full 完整；enrich 只補查缺少的規格；backfill 只做歷史回溯")
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     handler = {"collect": cmd_collect, "report": cmd_report, "run": cmd_run,
