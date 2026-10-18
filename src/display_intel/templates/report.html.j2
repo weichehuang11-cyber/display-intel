@@ -15,9 +15,9 @@
     {% if c.options|length > 1 %}<div style="font-size:11px;color:#999;">選配 {{ loop.index }}</div>{% endif %}
     {% if o.screen %}<div style="font-size:14px;line-height:1.6;">🖥 {{ o.screen }}</div>{% endif %}
     {% if o.bright %}<div style="font-size:14px;line-height:1.6;">☀ {{ o.bright }}</div>{% endif %}
-    <div style="font-size:14px;line-height:1.6;{% if not o.gamut %}color:#999;{% endif %}">🎨 {{ o.gamut or "色域：未標示" }}</div>
-    <div style="font-size:14px;line-height:1.6;{% if not o.surface %}color:#999;{% endif %}">◻ {{ ("表面：" ~ o.surface) if o.surface else "表面處理：未標示" }}</div>
-    <div style="font-size:14px;line-height:1.6;{% if not o.touch %}color:#999;{% endif %}">👆 {{ o.touch or "觸控：未標示" }}</div>
+    <div {% if not o.gamut %}class="d-only" {% endif %}style="font-size:14px;line-height:1.6;{% if not o.gamut %}color:#999;{% endif %}">🎨 {{ o.gamut or "色域：未標示" }}</div>
+    <div {% if not o.surface %}class="d-only" {% endif %}style="font-size:14px;line-height:1.6;{% if not o.surface %}color:#999;{% endif %}">◻ {{ ("表面：" ~ o.surface) if o.surface else "表面處理：未標示" }}</div>
+    <div {% if not o.touch %}class="d-only" {% endif %}style="font-size:14px;line-height:1.6;{% if not o.touch %}color:#999;{% endif %}">👆 {{ o.touch or "觸控：未標示" }}</div>
     {% if o.optics or o.structure or o.mechanics or o.interface %}
     <div style="font-size:12px;line-height:1.7;color:#555;margin-top:2px;">
       {% if o.optics %}<div>光學｜{{ o.optics }}</div>{% endif %}
@@ -64,6 +64,27 @@
   <td style="padding:6px;white-space:nowrap;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">{{ r.score }}</td>
 </tr>
 {%- endmacro -%}
+{#- 手機版精簡比較：一款兩三行，只列有資料的規格 -#}
+{%- macro cmp_compact(rows) -%}
+{% for r in rows %}
+<div style="padding:8px 4px;border-top:1px solid #e3e6ea;{% if r.stripe %}background:#f8fafc;{% else %}background:#fff;{% endif %}{% if not r.label %}padding-left:16px;{% endif %}">
+  <div style="font-size:13.5px;line-height:1.45;">
+    {% if r.label %}<b>{% if r.source_url %}<a href="{{ r.source_url }}" style="color:#1a1a1a;text-decoration:none;">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</b>{% if r.option %} <span style="font-size:11px;color:#999;">{{ r.option }}</span>{% endif %}
+    {% else %}<span style="font-size:12px;color:#777;">↳ {{ r.option }}</span>{% endif %}
+    <span style="font-size:11px;color:{% if r.score_pct >= 70 %}#1e7d4f{% elif r.score_pct >= 40 %}#8a6100{% else %}#b42318{% endif %};">　{{ r.score }}</span>
+    {% if r.updated %}<span style="font-size:11px;color:#1e7d4f;">　● 有更新</span>{% endif %}
+    {% for tg in r.tags or [] %}<span style="font-size:11px;color:#a16207;">　★ {{ tg }}</span>{% endfor %}
+  </div>
+  <div style="font-size:12.5px;line-height:1.75;color:#333;">{% if r.chips %}{% for k, txt in r.chips %}{% if k and k in r.best %}<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">{{ txt }}</b>{% else %}{{ txt }}{% endif %}{{ mk(r, k) }}{% if not loop.last %}<span style="color:#c4c4c4;"> · </span>{% endif %}{% endfor %}{% else %}<span style="color:#aaa;">規格待補</span>{% endif %}</div>
+  {% if r.price %}<div style="font-size:11.5px;color:#52514e;">{{ r.price }}</div>{% endif %}
+</div>
+{% endfor %}
+{%- endmacro -%}
+{#- 比較區塊：電腦版表格＋手機版精簡列表（以螢幕寬度切換） -#}
+{%- macro cmp_block(rows) -%}
+<div class="d-only">{{ cmp_table(rows) }}</div>
+<div class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;"><div style="border:1px solid #d5dae1;border-top:0;">{{ cmp_compact(rows) }}</div></div>
+{%- endmacro -%}
 {%- macro cmp_table(rows) -%}
 <div style="overflow-x:auto;">
 <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;background:#fff;border:1px solid #d5dae1;">
@@ -73,9 +94,17 @@
 </div>
 {%- endmacro -%}
 <!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ subject }}</title></head>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ subject }}</title>
+<style>
+/* 手機版（寬度 600px 以下）：比較表改成精簡列表、附錄只留前幾款。不支援的郵件程式會照舊顯示電腦版。 */
+@media only screen and (max-width:600px) {
+  .d-only { display:none !important; }
+  .m-only { display:block !important; max-height:none !important; overflow:visible !important; }
+  .wrap { padding:14px 10px !important; }
+}
+</style></head>
 <body style="margin:0;padding:0;background:#f2f4f7;font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;color:#222;">
-<div style="max-width:720px;margin:0 auto;padding:20px 14px;background:#f7f8fa;">
+<div class="wrap" style="max-width:720px;margin:0 auto;padding:20px 14px;background:#f7f8fa;">
 
   <div style="font-size:21px;font-weight:bold;margin:0 0 2px;">{{ title }}</div>
   <div style="color:#777;font-size:13px;margin-bottom:14px;">{{ date }}（週{{ weekday }}）・{{ period }}</div>
@@ -113,7 +142,7 @@
   <div style="font-size:11px;color:#888;margin:-4px 0 8px;">依尺寸分組；<b style="color:#1e7d4f;background:#e8f5ec;padding:0 3px;border-radius:3px;">綠底</b> 為組內最佳值；* 表示由面板型號推算；小字 <span style="color:#b4580a;">傳</span>＝傳聞、<span style="color:#b4580a;">面</span>＝面板原廠規格、<span style="color:#b4580a;">✎</span>＝人工更正；規格＝13 項重點規格已知幾項。點機型名稱可看來源。</div>
   {% for seg in compare_new %}
   <div style="font-size:13px;font-weight:bold;color:#1f3a5f;margin:12px 0 4px;">{{ seg.name }}（{{ seg.rows|selectattr("label")|list|length }} 款）</div>
-  {{ cmp_table(seg.rows) }}
+  {{ cmp_block(seg.rows) }}
   {% endfor %}
   {% endif %}
 
@@ -130,8 +159,9 @@
   {% if watch_cmp and (watch_cmp.rows or watch_cmp.pending) %}
   {{ h2("關注機型比較（" ~ (watch_cmp.rows|length) ~ " 款已建檔）", "#0f766e") }}
   <div style="font-size:11px;color:#888;margin:-4px 0 8px;">不論有沒有新聞都會追蹤，每月回查；每款顯示資料最完整的選配，完整清單見 Excel。</div>
-  {% if watch_cmp.rows %}{{ cmp_table(watch_cmp.rows) }}{% endif %}
-  {% if watch_cmp.pending %}<div style="font-size:11px;color:#999;margin-top:6px;">尚未建檔：{% for p in watch_cmp.pending %}{{ p.name }}（{{ p.status }}）{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
+  {% if watch_cmp.rows %}{{ cmp_block(watch_cmp.rows) }}{% endif %}
+  {% if watch_cmp.pending %}<div class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:11px;color:#999;margin-top:6px;">另有 {{ watch_cmp.pending|length }} 款尚未建檔，系統會陸續補上（清單見 Excel「關注機型」或電腦版）。</div>
+  <div class="d-only" style="font-size:11px;color:#999;margin-top:6px;">尚未建檔：{% for p in watch_cmp.pending %}{{ p.name }}（{{ p.status }}）{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
   {% endif %}
 
   {% if platform %}
@@ -282,7 +312,8 @@
 
   {% if rumor_panels or platform_rumors or fab_rumors or rumor_tracker %}
   {{ h2("傳聞與爆料（未經證實）", "#b4580a") }}
-  {% for c in rumor_panels %}{{ card(c) }}{% endfor %}
+  {% for c in rumor_panels %}{% if loop.index > 5 %}<div class="d-only">{{ card(c) }}</div>{% else %}{{ card(c) }}{% endif %}{% endfor %}
+  {% if rumor_panels|length > 5 %}<div class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:12px;color:#888;margin:0 0 8px;">手機版只顯示 5 則，其餘 {{ rumor_panels|length - 5 }} 則見電腦版。</div>{% endif %}
   {% for r in platform_rumors %}<p style="font-size:14px;margin:8px 0;">・<b>{{ r.vendor }} {{ r.tech }}</b>：{{ r.summary }} {{ src(r) }}</p>{% endfor %}
   {% for r in fab_rumors %}<p style="font-size:14px;margin:8px 0;">・<b>{{ r.maker }} {{ r.gen }}</b>：{{ r.summary }} {{ src(r) }}</p>{% endfor %}
   {% if rumor_tracker %}
@@ -299,7 +330,8 @@
   {% if new_panels %}
   {{ h2("新機詳細規格（" ~ new_panels|length ~ "）", "#64748b") }}
   <div style="font-size:12px;color:#888;margin:-4px 0 8px;">{{ panel_known }} 款已知面板來源。🖥 螢幕　☀ 亮度　🎨 色域　◻ 表面處理　👆 觸控　🏭 面板廠與型號</div>
-  {% for c in new_panels %}{{ card(c) }}{% endfor %}
+  {% for c in appendix %}{% if loop.index > mobile_cards %}<div class="d-only">{{ card(c) }}</div>{% else %}{{ card(c) }}{% endif %}{% endfor %}
+  {% if appendix|length > mobile_cards %}<div class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:12px;color:#888;margin:4px 0 0;">手機版只顯示有亮點、資料最完整的前 {{ mobile_cards }} 款；其餘 {{ appendix|length - mobile_cards }} 款的詳細規格見 Excel 附件或電腦版。</div>{% endif %}
   {% endif %}
 
   {% if ongoing %}
@@ -318,20 +350,22 @@
   {{ h2("系統健康與資料查核　" ~ health.icon, "#475569") }}
   <div style="font-size:12px;color:#888;margin:-4px 0 8px;">全部由程式檢查，不花 AI 額度。🟢 正常　🟡 注意　🔴 需處理</div>
   {% for title, rows in [("運作狀況", health.ops), ("資料正確性", health.quality)] %}
-  <div style="font-size:14px;font-weight:bold;margin:10px 0 4px;">{{ title }}</div>
+  <div style="font-size:14px;font-weight:bold;margin:10px 0 4px;">{{ title }}{% set n_ok = rows|selectattr("level", "equalto", "ok")|list|length %}{% if n_ok %}<span class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:12px;font-weight:normal;color:#888;">　另 {{ n_ok }} 項正常</span>{% endif %}</div>
   <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="font-size:13px;line-height:1.5;border-collapse:collapse;">
     {% for c in rows %}
-    <tr style="border-bottom:1px solid #eef0f2;">
+    <tr {% if c.level == "ok" %}class="d-only" {% endif %}style="border-bottom:1px solid #eef0f2;">
       <td style="width:22px;vertical-align:top;">{{ c.icon }}</td>
       <td style="width:84px;vertical-align:top;font-weight:bold;white-space:nowrap;">{{ c.name }}</td>
       <td style="vertical-align:top;">{{ c.detail }}
-        {% if c.notes %}<ul style="margin:4px 0 0;padding-left:18px;color:#666;font-size:12px;">{% for it in c.notes %}<li>{{ it }}</li>{% endfor %}</ul>{% endif %}
+        {% if c.notes %}<ul style="margin:4px 0 0;padding-left:18px;color:#666;font-size:12px;">{% for it in c.notes %}<li {% if loop.index > 3 %}class="d-only"{% endif %}>{{ it }}</li>{% endfor %}{% if c.notes|length > 3 %}<li class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;list-style:none;margin-left:-18px;color:#999;">…另 {{ c.notes|length - 3 }} 項見電腦版或 Excel「資料查核」</li>{% endif %}</ul>{% endif %}
       </td>
     </tr>
     {% endfor %}
   </table>
   {% endfor %}
   {% if health.audit %}
+  <div class="m-only" style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:12px;color:#888;margin-top:10px;">抽樣稽核（{{ health.audit|length }} 款）見電腦版或 Excel「資料查核」。</div>
+  <div class="d-only">
   <div style="font-size:14px;font-weight:bold;margin:14px 0 4px;">抽樣稽核（本週隨機 {{ health.audit|length }} 款，點來源 1 分鐘可核對）</div>
   {% for a in health.audit %}
   <div style="border-left:3px solid #cbd5e1;padding:4px 10px;margin:0 0 8px;font-size:13px;line-height:1.6;">
@@ -340,14 +374,17 @@
     <a href="{{ a.source_url }}" style="color:#1f5fa8;text-decoration:none;font-size:12px;">{{ a.source_name or "來源" }} ›</a>
   </div>
   {% endfor %}
+  </div>
   {% endif %}
   {% endif %}
 
   {% if glossary %}
+  <div class="d-only">
   {{ h2("名詞小辭典", "#999") }}
   <table role="presentation" cellpadding="4" cellspacing="0" width="100%" style="font-size:12px;line-height:1.6;color:#555;">
     {% for term, desc in glossary %}<tr><td style="white-space:nowrap;vertical-align:top;font-weight:bold;padding-right:8px;">{{ term }}</td><td>{{ desc }}</td></tr>{% endfor %}
   </table>
+  </div>
   {% endif %}
 
   <hr style="border:none;border-top:1px solid #e3e6ea;margin:24px 0 12px;">

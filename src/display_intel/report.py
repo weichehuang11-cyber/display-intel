@@ -361,6 +361,9 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         ctx[k] = group_by_model(ctx[k])
     ctx["panel_known"] = sum(1 for c in ctx["new_panels"] if c["panel_known"])
     ctx["compare_new"] = comparison(ctx["new_panels"])
+    # 詳細規格附錄：有亮點、資料多的排前面（手機版只顯示前 mobile_cards 款）
+    ctx["appendix"] = sorted(ctx["new_panels"], key=lambda c: (not c.get("tags"), -c["score_pct"], c["brand"].lower()))
+    ctx["mobile_cards"] = (cfg.get("report") or {}).get("mobile_cards", 8)
     if ctx["kpis"]:
         ctx["kpis"][0] = {"label": "新機型", "value": str(len(ctx["new_panels"])),
                           "note": f"共 {len(new_panels)} 種螢幕選配"}
@@ -664,10 +667,48 @@ def compare_row(rec: PanelRecord, label: str = "", option: str = "", extra: dict
         "touch": "觸控" if s.touch else "", "price": price_text(s),
         "score": f"{k}/{t}", "score_pct": round(k / t * 100),
         "best": set(), "source_url": rec.source_url,
+        "chips": compact_chips(rec),
         "marks": {k: (m, rec.source_of(f).label) for k, f in CMP_FIELDS.items()
                   if getattr(s, f) not in (None, [], "") and (m := source_mark(rec.source_of(f)))},
         **(extra or {}),
     }
+
+
+def compact_chips(rec: PanelRecord) -> list[tuple[str, str]]:
+    """手機版比較：只列有資料的規格，一款兩三行。回傳 [(欄位代碼, 文字)]，代碼用來標最佳值與出處記號。"""
+    s = rec.spec
+    out = []
+    size = (f'{rec.size_corrected:g}"*' if rec.size_corrected else f'{s.size_inch:g}"') if s.size_inch \
+        else (f'{rec.size_inferred:g}"*' if rec.size_inferred else "")
+    if size:
+        out.append(("size", size))
+    if s.panel_tech:
+        out.append(("tech", s.panel_tech))
+    if s.res_w and s.res_h:
+        out.append(("res", f"{s.res_w}×{s.res_h}"))
+    elif rec.res_inferred:
+        out.append(("res", f"{rec.res_inferred}*"))
+    if s.refresh_hz:
+        out.append(("refresh", f"{s.refresh_hz:g}Hz"))
+    if s.response_ms:
+        out.append(("response", f"{s.response_ms:g}ms"))
+    if s.sdr_nits:
+        out.append(("sdr", f"{s.sdr_nits:g} nits"))
+    if s.hdr_peak_nits:
+        out.append(("hdr", f"HDR {s.hdr_peak_nits:g}"))
+    if s.dci_p3_pct:
+        out.append(("p3", f"P3 {s.dci_p3_pct:g}%"))
+    elif s.srgb_pct:
+        out.append(("", f"sRGB {s.srgb_pct:g}%"))
+    code = derive.surface_code(s.surface)
+    if code or s.surface:
+        out.append(("surface", code or (s.surface[:14] + ("…" if len(s.surface) > 14 else ""))))
+    if s.touch:
+        out.append(("touch", "觸控"))
+    maker = rec.maker
+    if maker:
+        out.append(("maker", (f"{maker}*" if rec.panel_maker_inferred else maker) + (f" {s.panel_model}" if s.panel_model else "")))
+    return out
 
 
 def mark_best(rows: list[dict]):

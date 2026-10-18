@@ -270,6 +270,7 @@ keywords:
 report:
   subject_prefix: "[顯示器情報週報]"
   ongoing_days: 30          # 「持續討論中」回看天數
+  mobile_cards: 8           # 手機版「新機詳細規格」只顯示前幾款（有亮點、資料最完整的優先）
   output_dir: output
   database: data/intel.sqlite
 
