@@ -41,6 +41,7 @@ collection:
   enrich_schedule_days: [0, 14, 35]   # 補查時間：第一次立刻查，之後在上市第 14、35 天再查（配合評測出現）
   enrich_retry_days: 6                # 兩次補查至少間隔幾天
   enrich_within_days: 60              # 只補查 60 天內出現的機型
+  panel_hunt: true                    # 缺面板型號的機型，專門到評測網站搜尋一次（每款最多 1 次 Tavily，原文掃描不花 AI）
   watch_per_run: 5                    # 每次蒐集最多幫幾款「關注機型」建檔或回查（週日加倍）
   watch_refresh_days: 30              # 關注機型每隔幾天回查一次（抓新款與規格更新）
   enrich_monthly_cap: 850             # Tavily 當月用到這個數字就暫停補查（保留餘裕給臨時需求）

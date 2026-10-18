@@ -161,6 +161,73 @@ def search_specs(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -
     return out[:4]
 
 
+# ---------- 面板型號（原文掃描＋專門搜尋）----------
+# 評測網站的規格區通常寫出面板型號或 EDID 識別碼（例如「BOE NE160QDM-NZ1, IPS」「BOE0B8E」）
+PANEL_HUNT_DOMAINS = ["notebookcheck.net", "notebookcheck.org", "notebookcheck.com", "laptopmedia.com",
+                      "ultrabookreview.com", "nanoreview.net"]
+
+
+def assign_panel_ids(db: DB, group: list[PanelRecord], pages: list[RawArticle]) -> list[str]:
+    """從網頁原文找面板型號，填到缺型號的螢幕選配（不經 AI，原文片段即為依據）。
+
+    只在對應明確時填入：面板型號推算的尺寸要和選配相符；EDID 識別碼（無尺寸）只在只有一個選配缺型號、
+    而且頁面上只有一個識別碼時使用。回傳填入說明。
+    """
+    from .panel_decode import find_panel_ids
+    done = []
+    missing = [r for r in group if not r.spec.panel_model and r.source_of("panel_model").kind != "manual"]
+    for page in pages:
+        if not missing:
+            break
+        text = f"{page.title}\n{page.summary}\n{page.content}"
+        ids = find_panel_ids(text)
+        if not ids:
+            continue
+        for rec in list(missing):
+            size = rec.spec.size_inch or rec.size_inferred
+            if size:
+                cands = [i for i in ids if i["size_inch"] and abs(i["size_inch"] - size) <= 0.6]
+            else:
+                cands = []
+            if not cands and len(missing) == 1 and len(ids) == 1 and ids[0]["size_inch"] is None:
+                cands = ids  # EDID 識別碼
+            if len({c["id"] for c in cands}) != 1:
+                continue  # 沒有或有多個候選（例如同尺寸有兩種面板），不猜
+            c = cands[0]
+            if rec.spec.panel_maker and rec.spec.panel_maker != c["maker"]:
+                continue  # 和文章寫的面板廠矛盾，不填
+            data = rec.spec.model_dump()
+            data["panel_model"] = c["id"]
+            data["evidence"]["panel_model"] = c["quote"]
+            rec.spec = PanelSpec(**data)
+            conf = verify.confidence_for(page, False)
+            rec.field_sources["panel_model"] = FieldSource(url=page.url, source=page.source, conf=conf, at=utcnow())
+            rec.last_updated = utcnow()
+            rec = verify._derived(rec)
+            db.put_panel(rec)
+            db.add_event("panel", "updated", {"record": rec.model_dump(mode="json"), "changes": {"panel_model": [None, c["id"]]}},
+                         conf.value, page.url, page.source)
+            missing.remove(next(m for m in missing if m.key == rec.key))
+            done.append(f"{rec.spec.brand} {rec.spec.model}：面板 {c['id']}（{c['maker']}）")
+    return done
+
+
+def hunt_panel(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -> list[RawArticle]:
+    """缺面板型號時，專門到評測網站搜尋一次（只掃描原文，不花 AI 額度）。"""
+    size = rec.spec.size_inch or rec.size_inferred
+    query = f"{rec.spec.brand} {rec.spec.model} {f'{size:g} inch ' if size else ''}display panel"
+    target = verify.model_norm(rec.spec)
+    out = []
+    for item in _tavily(client, budget, query, 5, PANEL_HUNT_DOMAINS):
+        raw = item.get("raw_content") or ""
+        if not target or target not in verify._norm(f"{item.get('title', '')} {item.get('content', '')} {raw[:30000]}"):
+            continue
+        out.append(RawArticle(url=canonical_url(item["url"]), title=item.get("title", ""), source=urlsplit(item["url"]).netloc,
+                              source_type="review", summary=item.get("content", "")[:2000], content=raw,
+                              content_level="full" if len(raw) > 800 else "snippet"))
+    return out
+
+
 # ---------- 面板型號反查 ----------
 
 PANEL_PROMPT = """你是顯示器面板規格分析師。從文章中找出面板「{model}」的原廠規格，只輸出 JSON：
@@ -347,7 +414,8 @@ def enrich(db: DB, cfg: dict, llm: LLM, limit: int, should_stop: Callable[[], bo
     """補完最多 limit 款機型。回傳統計。"""
     col = cfg.get("collection") or {}
     stats = {"candidates": 0, "searched": 0, "tavily": 0, "pages": 0, "improved": 0, "fields_added": 0,
-             "panel_lookups": 0, "watch_checked": 0, "watch_found": 0, "stopped": "", "details": []}
+             "panel_lookups": 0, "panel_ids": 0, "panel_hunts": 0, "watch_checked": 0, "watch_found": 0, "stopped": "",
+             "details": []}
     if limit <= 0 or not env("TAVILY_API_KEY"):
         stats["stopped"] = "未設定 TAVILY_API_KEY 或補完數量為 0"
         return stats
@@ -393,9 +461,24 @@ def enrich(db: DB, cfg: dict, llm: LLM, limit: int, should_stop: Callable[[], bo
                     if ex_stats.get("stopped"):
                         stats["stopped"] = ex_stats["stopped"]
                         break
+                same = lambda r: (verify._norm(r.spec.brand) == verify._norm(rep.spec.brand)
+                                  and verify.model_norm(r.spec) == verify.model_norm(rep.spec))
+                # 面板型號：先掃描剛抓到的頁面原文；還缺的話專門到評測網站搜尋一次
+                current = [r for r in db.all_panels() if same(r)]
+                found = assign_panel_ids(db, current, pages)
+                if col.get("panel_hunt", True) and any(not r.spec.panel_model for r in current) \
+                        and not any(r.panel_hunt_done for r in current if not r.spec.panel_model):
+                    for r in current:
+                        if not r.spec.panel_model:
+                            r.panel_hunt_done = True  # 同一款只專門搜尋一次
+                            db.put_panel(r)
+                    hunt = [p for p in hunt_panel(client, rep, budget) if p.url not in seen]
+                    stats["panel_hunts"] += 1
+                    found += assign_panel_ids(db, [r for r in db.all_panels() if same(r)], hunt)
+                stats["panel_ids"] += len(found)
+                stats["details"] += found
                 # 面板型號反查（同一款只查一次）
-                current = [r for r in db.all_panels()
-                           if verify._norm(r.spec.brand) == verify._norm(rep.spec.brand) and verify.model_norm(r.spec) == verify.model_norm(rep.spec)]
+                current = [r for r in db.all_panels() if same(r)]
                 for r in current:
                     if r.spec.panel_model and not r.panel_lookup_done and len(missing_fields(r)) > 0:
                         r.panel_lookup_done = True

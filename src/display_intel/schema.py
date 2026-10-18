@@ -219,7 +219,8 @@ class PanelRecord(BaseModel):
     # 規格補完紀錄
     enrich_attempts: int = 0
     last_enriched: Optional[datetime] = None
-    panel_lookup_done: bool = False
+    panel_lookup_done: bool = False  # 已用面板型號反查原廠規格
+    panel_hunt_done: bool = False    # 缺面板型號時已專門搜尋過
     watch: Optional[str] = None  # 屬於哪一個關注機型（config.yaml 的 watchlist）
     panel_spec_fields: list[str] = Field(default_factory=list)  # 來自面板原廠規格（非整機實測）的欄位
     corroborated: dict[str, list[str]] = Field(default_factory=dict)  # 欄位 → 數值一致的其他獨立來源（網域）

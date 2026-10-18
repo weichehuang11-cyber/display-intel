@@ -87,3 +87,29 @@ def decode(panel_model: Optional[str]) -> Optional[dict]:
             size = None
         return {"maker": maker, "size_inch": size}
     return None
+
+
+# ---------- 從網頁原文找面板型號（不經 AI）----------
+_EDID_RE = re.compile(r"\b(" + "|".join(EDID_VENDORS) + r")([0-9A-F]{4})\b")
+_PART_RE = re.compile(r"\b((?:ATNA|NE|NV|TV|LP|LQ|MN[A-Z]|B|N)\d{2,3}[A-Z0-9]{2,8}(?:[-.][A-Z0-9]{1,6}){0,2})\b")
+
+
+def find_panel_ids(text: str) -> list[dict]:
+    """在原文中找面板型號與 EDID 識別碼。回傳 [{id, maker, size_inch, quote}]，quote 是原文片段（逐字）。"""
+    out, seen = [], set()
+    for m in list(_EDID_RE.finditer(text)) + list(_PART_RE.finditer(text)):
+        pid = m.group(0)
+        if pid in seen:
+            continue
+        if m.re is _EDID_RE and not re.search(r"\d", m.group(2)):
+            continue  # 四碼都是字母，多半不是識別碼
+        if m.re is _PART_RE and len(pid) < 8:
+            continue  # 太短容易誤判（例如處理器、晶片組型號）
+        dec = decode(pid)
+        if not dec:
+            continue
+        seen.add(pid)
+        start, end = max(0, m.start() - 40), min(len(text), m.end() + 40)
+        quote = re.sub(r"\s+", " ", text[start:end]).strip()
+        out.append({"id": pid, "maker": dec["maker"], "size_inch": dec["size_inch"], "quote": quote})
+    return out

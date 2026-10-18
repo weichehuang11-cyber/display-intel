@@ -451,7 +451,8 @@ def test_enrich_end_to_end(db, monkeypatch):
                                                             "max_chars_per_review": 8000}}
     stats = enr.enrich(db, cfg, FakeLLM([reply]), limit=5)
     assert stats["searched"] == 1 and stats["pages"] == 1  # 沒提到 OmniBook 5 的頁面被過濾、重複網址合併
-    assert stats["tavily"] == 2 and db.usage("tavily") == 2  # 評測＋官方各一次
+    assert stats["tavily"] == 3 and db.usage("tavily") == 3  # 評測＋官方各一次，缺面板型號再專門搜尋一次
+    assert stats["panel_hunts"] == 1
     assert stats["improved"] == 1 and stats["fields_added"] >= 4
     recs = db.all_panels()
     assert len(recs) == 1 and recs[0].maker == "Samsung Display" and recs[0].confidence == Confidence.B
@@ -1005,3 +1006,24 @@ def test_manual_corrections(tmp_path):
     assert rec.spec.refresh_hz == 240 and rec.spec.pwm_hz is None
     chk = health.corrections_check(db.all_panels(), cfg)
     assert chk["level"] == "warn" and any("不存在" in n for n in chk["notes"])
+
+
+def test_panel_ids_from_page_text(tmp_path):
+    from display_intel.db import DB
+    from display_intel.enrich import assign_panel_ids
+    from display_intel.panel_decode import find_panel_ids
+    ids = find_panel_ids("Display: BOE NE160QDM-NZ1, IPS, 2560 x 1600. CPU Intel N100, B650 chipset, LPDDR5X. ID BOE0B8E, BOEABCD")
+    assert [i["id"] for i in ids] == ["BOE0B8E", "NE160QDM-NZ1"] and ids[1]["size_inch"] == 16.0
+    db = DB(tmp_path / "p.sqlite")
+    for size, res in ((16, 2560), (14, 1920)):
+        verify.merge_panel(db, PanelSpec(brand="Lenovo", model="Legion 5", size_inch=size, res_w=res, res_h=res * 10 // 16,
+                                         evidence={"size_inch": str(size), "res_w": str(res)}), Confidence.C, art(url=f"https://n.com/{size}"), [])
+    page = art(url="https://www.notebookcheck.net/legion5.html", source_type="review",
+               body="Lenovo Legion 5 review. Display BOE NE160QDM-NZ1, IPS, 2560 x 1600 pixels. Also tested AUO B160UAN01.Q and Innolux N140HCA-EAC")
+    done = assign_panel_ids(db, db.all_panels(), [page])
+    recs = {r.spec.size_inch: r for r in db.all_panels()}
+    assert len(done) == 1  # 16 吋有兩個候選（BOE、AUO）→ 不猜；14 吋只有 Innolux
+    assert recs[16].spec.panel_model is None
+    assert recs[14].spec.panel_model == "N140HCA-EAC" and recs[14].maker == "Innolux"
+    assert recs[14].source_of("panel_model").conf == Confidence.B and "N140HCA-EAC" in recs[14].spec.evidence["panel_model"]
+    assert derive.quote_in_text(recs[14].spec.evidence["panel_model"], page.content)
