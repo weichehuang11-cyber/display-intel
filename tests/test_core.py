@@ -905,6 +905,7 @@ def test_health_filters_false_alarms():
     d = _rec("d4", 1, brand="ASUS", model="Vivobook S16 M3607KA")
     dups = health.possible_duplicates([a, b, c, d, d])
     assert len(dups) == 1 and "M3607GA" in dups[0]
+    assert health.possible_duplicates([a, b, c, d], ignore=[["vivobook s16 m3607ka", "Vivobook S16 M3607GA"]]) == []
     r = _rec("d5", 1, brand="HP", model="X")
     assert health._conflict(r, "來源數值不一致：gpu（RTX 5060 vs RTX 5070，Tavily 搜尋）") is None
     assert health._conflict(r, "來源數值不一致：surface（matte vs anti-glare matte，A）") is None

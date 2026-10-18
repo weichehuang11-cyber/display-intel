@@ -274,3 +274,7 @@ report:
 health:
   collect_weekdays: [0, 2, 4, 6]   # 預期蒐集的日子（0=週一 … 6=週日），沒跑會提醒
   audit_samples: 5                 # 每週隨機抽幾款，列出數值＋原文給你人工核對
+  # 確認過「不是同一款、分開列」的機型名稱（健康檢查不再提醒可能重複）
+  not_duplicates:
+    - ["Vivobook S16 M3607GA", "Vivobook S16 M3607KA"]
+    - ["HyperX Omen 16", "HyperX Omen Max 16"]

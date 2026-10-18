@@ -200,8 +200,14 @@ def _filled(rec: PanelRecord) -> list[str]:
             if f not in _NO_EVIDENCE and v not in (None, [], "")]
 
 
-def possible_duplicates(records: list[PanelRecord], limit: int = 8) -> list[str]:
+def _pair_key(a: str, b: str) -> frozenset:
+    return frozenset(re.sub(r"\W", "", x.lower()) for x in (a, b))
+
+
+def possible_duplicates(records: list[PanelRecord], limit: int = 8, ignore: list | None = None) -> list[str]:
+    """ignore：config.yaml health.not_duplicates，確認過「不是同一款」的機型名稱對，不再提醒。"""
     from .verify import model_norm
+    skip = {_pair_key(*p) for p in (ignore or []) if len(p) == 2}
     by_brand: dict[str, list[PanelRecord]] = {}
     for r in records:
         if r.spec.brand and r.spec.model:
@@ -211,6 +217,8 @@ def possible_duplicates(records: list[PanelRecord], limit: int = 8) -> list[str]
         for i, a in enumerate(recs):
             for b in recs[i + 1:]:
                 na, nb = model_norm(a.spec), model_norm(b.spec)
+                if _pair_key(a.spec.model, b.spec.model) in skip:
+                    continue
                 if na == nb or re.findall(r"\d+", na) != re.findall(r"\d+", nb):
                     continue  # 同名不同螢幕選配是正常的；數字不同（P14／P16）是不同機型
                 pair = f"{a.spec.brand} 「{min(a.spec.model, b.spec.model)}」與「{max(a.spec.model, b.spec.model)}」"
@@ -244,7 +252,8 @@ def audit_sample(records: list[PanelRecord], now: datetime, n: int = 5) -> list[
     return out
 
 
-def data_quality(records: list[PanelRecord], since: datetime, now: datetime) -> tuple[list[dict], dict]:
+def data_quality(records: list[PanelRecord], since: datetime, now: datetime,
+                 not_duplicates: list | None = None) -> tuple[list[dict], dict]:
     recent = [r for r in records if r.last_updated >= since and r.confidence.rank >= Confidence.C.rank]
     checks = []
 
@@ -302,7 +311,7 @@ def data_quality(records: list[PanelRecord], since: datetime, now: datetime) -> 
                          f"{len(issues)} 處規格彼此對不起來，建議人工確認" if issues else "沒有發現矛盾", issues[:10]))
 
     # 可能重複的機型
-    dups = possible_duplicates([r for r in records if r.confidence.rank >= Confidence.C.rank])
+    dups = possible_duplicates([r for r in records if r.confidence.rank >= Confidence.C.rank], ignore=not_duplicates)
     checks.append(_check("重複機型", "warn" if dups else "ok",
                          f"{len(dups)} 組名稱很接近、可能沒合併" if dups else "沒有發現疑似重複", dups))
 
@@ -314,7 +323,8 @@ def build(db: DB, cfg: dict, now: datetime, records: list[PanelRecord] | None = 
     records = records if records is not None else db.all_panels()
     since = now - timedelta(days=days)
     ops = operations(db, cfg, now, days)
-    quality, stats = data_quality(records, since.astimezone(timezone.utc), now)
+    quality, stats = data_quality(records, since.astimezone(timezone.utc), now,
+                                  (cfg.get("health") or {}).get("not_duplicates"))
     worst = max([c["level"] for c in ops + quality] or ["ok"], key=LEVEL_RANK.get)
     n_warn = sum(c["level"] != "ok" for c in ops + quality)
     summary = {"ok": "全部正常", "warn": f"{n_warn} 項需要注意", "bad": f"{n_warn} 項異常，其中有需要處理的問題"}[worst]
