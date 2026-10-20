@@ -1125,15 +1125,20 @@ def test_numbers_must_appear_in_evidence():
 
 
 def test_aligned_comparison_table():
-    from display_intel.report import comparison, group_by_model, panel_card, spec_cells, render_html, SPEC_COLS
+    from display_intel.report import comparison, group_by_model, panel_card, spec_cells, DESKTOP_COLS, MOBILE_GRID, TEMPLATES
     r = _rec("m1", 1, brand="HP", model="OMEN 17", size_inch=17, res_w=1920, res_h=1080, refresh_hz=144, surface="anti-glare",
-             panel_tech="IPS LCD")
-    cells = {c["key"]: c["text"] for c in spec_cells(r)}
-    # 每欄固定一項規格；沒資料的欄位是空字串（表格顯示淡灰 –），位置不會因為缺資料而移動
-    assert [c["key"] for c in spec_cells(r)] == [k for k, *_ in SPEC_COLS]
-    assert cells["size"] == "17.3*" and cells["tech"] == "IPS" and cells["res"] == "1920×1080" and cells["refresh"] == "144"
-    assert cells["surface"] == "AG" and cells["sdr"] == "" and cells["p3"] == ""
-    segs = comparison(group_by_model([panel_card(r), panel_card(_rec("m2", 1, brand="HP", model="X", size_inch=17.3, refresh_hz=240))]))
-    from display_intel.report import TEMPLATES
+             panel_tech="IPS LCD", srgb_pct=100, ntsc_pct=72, panel_maker="Samsung Display")
+    c = spec_cells(r)
+    # 每格固定一項規格；電腦版與手機版欄位都有對應的格子
+    assert all(k in c for k, *_ in DESKTOP_COLS) and all(k in c for row in MOBILE_GRID for k, *_ in row)
+    assert c["size"]["text"] == "17.3*" and c["sizetech"]["text"] == '17.3*" IPS' and c["res"]["text"] == "1920×1080"
+    assert c["sdr"]["text"] == "" and c["surface"]["text"] == "AG"
+    # 色域照文章寫的標準顯示（沒有 DCI-P3 就顯示 sRGB），最佳值只跟同一種標準比
+    assert c["gamut"]["text"] == "sRGB 100 / NTSC 72" and c["gamut"]["mtext"] == "sRGB 100" and c["gamut"]["best"] == "srgb"
+    assert c["maker"]["text"] == "Samsung Display" and c["maker"]["mtext"] == "SDC"
+    other = _rec("m2", 1, brand="HP", model="X", size_inch=17.3, dci_p3_pct=100, srgb_pct=90)
+    segs = comparison(group_by_model([panel_card(r), panel_card(other)]))
+    rows = {x["label"]: x for x in segs[0]["rows"]}
+    assert "srgb" in rows["HP OMEN 17"]["best"] and "p3" not in rows["HP OMEN 17"]["best"]
     src = (TEMPLATES / "report.html.j2").read_text()
-    assert ".mh { display:none !important; }" in src and "cmp_name" in src and "cmp_compact" not in src
+    assert "cmp_table_m" in src and "table-layout:fixed" in src

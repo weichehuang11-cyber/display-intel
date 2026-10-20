@@ -58,7 +58,7 @@ PROV_SKIP = {"brand", "model", "product_type", "regions", "evidence", "res_h"}
 # 比較表欄位 → 規格欄位（用來標示出處記號）
 CMP_FIELDS = {"size": "size_inch", "tech": "panel_tech", "res": "res_w", "refresh": "refresh_hz", "response": "response_ms",
               "sdr": "sdr_nits", "hdr": "hdr_peak_nits", "p3": "dci_p3_pct", "surface": "surface", "maker": "panel_maker",
-              "touch": "touch", "srgb": "srgb_pct"}
+              "touch": "touch", "srgb": "srgb_pct", "adobe": "adobe_rgb_pct", "ntsc": "ntsc_pct"}
 
 
 def source_mark(fs) -> str:
@@ -361,7 +361,8 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         ctx[k] = group_by_model(ctx[k])
     ctx["panel_known"] = sum(1 for c in ctx["new_panels"] if c["panel_known"])
     ctx["compare_new"] = comparison(ctx["new_panels"])
-    ctx["spec_cols"] = [{"key": k, "head": h, "unit": u, "mobile": m, "right": rt} for k, h, u, m, rt, _ in SPEC_COLS]
+    ctx["spec_cols"] = [{"key": k, "head": h, "unit": u, "width": w} for k, h, u, w in DESKTOP_COLS]
+    ctx["mobile_grid"] = [[{"key": k, "head": h, "unit": u} for k, h, u in row] for row in MOBILE_GRID]
     # 詳細規格附錄：有亮點、資料多的排前面（手機版只顯示前 mobile_cards 款）
     ctx["appendix"] = sorted(ctx["new_panels"], key=lambda c: (not c.get("tags"), -c["score_pct"], c["brand"].lower()))
     ctx["mobile_cards"] = (cfg.get("report") or {}).get("mobile_cards", 8)
@@ -637,7 +638,8 @@ SEGMENT_ORDER = ["13 吋以下", "14 吋級", "15.6 吋級", "16 吋級", "17–
 BEST_RULES = {
     "refresh": (lambda s, r: s.refresh_hz, max), "response": (lambda s, r: s.response_ms, min),
     "sdr": (lambda s, r: s.sdr_nits, max), "hdr": (lambda s, r: s.hdr_peak_nits, max),
-    "p3": (lambda s, r: s.dci_p3_pct, max), "srgb": (lambda s, r: s.srgb_pct, max), "ppi": (lambda s, r: r.ppi, max),
+    "p3": (lambda s, r: s.dci_p3_pct, max), "srgb": (lambda s, r: s.srgb_pct, max),
+    "adobe": (lambda s, r: s.adobe_rgb_pct, max), "ntsc": (lambda s, r: s.ntsc_pct, max), "ppi": (lambda s, r: r.ppi, max),
 }
 
 
@@ -697,26 +699,58 @@ def _res_cell(rec: PanelRecord) -> str:
     return f"{rec.res_inferred}*" if rec.res_inferred else ""
 
 
-# (欄位代碼, 表頭, 單位, 手機顯示, 數值靠右, 取值)；欄位代碼同時用於最佳值（BEST_RULES）與出處記號（CMP_FIELDS）
-SPEC_COLS = [
-    ("size", "尺寸", "吋", True, True, _size_cell),
-    ("tech", "面板", "", True, False, lambda r: TECH_SHORT.get(r.spec.panel_tech or "", r.spec.panel_tech or "")),
-    ("res", "解析度", "", True, True, _res_cell),
-    ("refresh", "刷新", "Hz", True, True, lambda r: _num(r.spec.refresh_hz)),
-    ("response", "反應", "ms", False, True, lambda r: _num(r.spec.response_ms)),
-    ("sdr", "SDR", "nits", True, True, lambda r: _num(r.spec.sdr_nits)),
-    ("hdr", "HDR", "nits", False, True, lambda r: _num(r.spec.hdr_peak_nits)),
-    ("p3", "DCI-P3", "%", True, True, lambda r: _num(r.spec.dci_p3_pct)),
-    ("srgb", "sRGB", "%", False, True, lambda r: _num(r.spec.srgb_pct)),
-    ("surface", "表面", "", True, False, lambda r: derive.surface_code(r.spec.surface)
-     or ((r.spec.surface[:10] + "…") if r.spec.surface and len(r.spec.surface) > 10 else (r.spec.surface or ""))),
-    ("touch", "觸控", "", False, False, lambda r: "✓" if r.spec.touch else ("✗" if r.spec.touch is False else "")),
-    ("maker", "面板廠", "", False, False, lambda r: (f"{r.maker}*" if r.panel_maker_inferred else r.maker) if r.maker else ""),
-]
+GAMUT_STDS = [("p3", "P3", "dci_p3_pct"), ("srgb", "sRGB", "srgb_pct"), ("adobe", "Adobe", "adobe_rgb_pct"), ("ntsc", "NTSC", "ntsc_pct")]
 
 
-def spec_cells(rec: PanelRecord) -> list[dict]:
-    return [{"key": k, "text": get(rec), "mobile": mob, "right": right} for k, _, _, mob, right, get in SPEC_COLS]
+def _gamut(rec: PanelRecord) -> list[tuple[str, str]]:
+    """文章寫了哪些色域標準就列哪些（照原文，不換算）：[(最佳值代碼, "P3 100")]。"""
+    return [(k, f"{label} {getattr(rec.spec, f):g}") for k, label, f in GAMUT_STDS if getattr(rec.spec, f)]
+
+
+def _surface_cell(rec: PanelRecord) -> str:
+    s = rec.spec.surface
+    return derive.surface_code(s) or ((s[:9] + "…") if s and len(s) > 9 else (s or ""))
+
+
+def _maker_cell(rec: PanelRecord) -> str:
+    return (f"{rec.maker}*" if rec.panel_maker_inferred else rec.maker) if rec.maker else ""
+
+
+def _tech_cell(rec: PanelRecord) -> str:
+    return TECH_SHORT.get(rec.spec.panel_tech or "", rec.spec.panel_tech or "")
+
+
+# 電腦版：一排一個選配。(欄位代碼, 表頭, 單位, 欄寬 %)
+DESKTOP_COLS = [("size", "尺寸", "吋", 6), ("tech", "面板", "", 9), ("res", "解析度", "", 13), ("refresh", "刷新", "Hz", 7),
+                ("response", "反應", "ms", 6), ("sdr", "SDR", "nits", 7), ("hdr", "HDR", "nits", 7), ("gamut", "色域", "%", 17),
+                ("surface", "表面", "", 9), ("touch", "觸控", "", 5), ("maker", "面板廠", "", 14)]
+# 手機版：一個選配兩排、每排 4 格，上下排欄位固定
+MOBILE_GRID = [[("sizetech", "尺寸／面板", "吋"), ("res", "解析度", ""), ("refresh", "刷新", "Hz"), ("sdr", "亮度", "nits")],
+               [("gamut", "色域", "%"), ("surface", "表面", ""), ("maker", "面板廠", ""), ("touch", "觸控", "")]]
+# 為了相容舊程式（Excel 等）保留的欄位清單
+SPEC_COLS = [(k, h, u, True, True, None) for k, h, u, _ in DESKTOP_COLS]
+
+
+def spec_cells(rec: PanelRecord) -> dict[str, dict]:
+    """比較表每一格：text（電腦版）、mtext（手機版）、best（最佳值代碼）、mark（出處記號代碼）。"""
+    s = rec.spec
+    size, tech = _size_cell(rec), _tech_cell(rec)
+    gam = _gamut(rec)
+    cell = lambda text, best=None, mark=None, mtext=None: {"text": text, "mtext": text if mtext is None else mtext,
+                                                          "best": best, "mark": mark}
+    return {
+        "size": cell(size, None, "size"), "tech": cell(tech, None, "tech"),
+        "sizetech": cell(" ".join(x for x in [f'{size}"' if size else "", tech] if x), None, "size"),
+        "res": cell(_res_cell(rec), None, "res"),
+        "refresh": cell(_num(s.refresh_hz), "refresh", "refresh"),
+        "response": cell(_num(s.response_ms), "response", "response"),
+        "sdr": cell(_num(s.sdr_nits), "sdr", "sdr"), "hdr": cell(_num(s.hdr_peak_nits), "hdr", "hdr"),
+        "gamut": cell(" / ".join(t for _, t in gam), gam[0][0] if gam else None, gam[0][0] if gam else None,
+                      gam[0][1] if gam else ""),
+        "surface": cell(_surface_cell(rec), None, "surface"),
+        "touch": cell("✓" if s.touch else ("✗" if s.touch is False else ""), None, "touch"),
+        "maker": cell(_maker_cell(rec), None, "maker", _maker_cell(rec).replace("Samsung Display", "SDC").replace("LG Display", "LGD")),
+    }
 
 
 def mark_best(rows: list[dict]):
