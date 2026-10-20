@@ -22,7 +22,7 @@ analytics.py 規格完整度（13 項重點欄位，含觸控）、價格帶（c
 enrich.py   規格補完（以機型為單位）：完整度未達 enrich_target 的機型，依 enrich_schedule_days 回訪；每次評測網站＋官方規格各搜尋一次 → focus 萃取 → 合併；面板型號：assign_panel_ids 以 panel_decode.find_panel_ids 掃描頁面原文（不經 AI，原文片段為 evidence，依推算尺寸對應選配、不明確不填），仍缺時 hunt_panel 到 PANEL_HUNT_DOMAINS 搜一次（panel_hunt_done）；有面板型號時反查面板原廠規格（只填空白，記在 panel_spec_fields、field_sources kind=panel_datasheet）；Tavily 月用量記在 db.usage，達 enrich_monthly_cap 停止
             關注機型（watchlist）：watch_due 依 watch_state 表排程 → search_watch（中文機型用中文查詢）→ focus 萃取 → ingest(tag="watch")；報告中 watch 建檔的 new 事件不算新機
 backfill.py 歷史回溯：季度×查詢單位（backfill_state 表），Tavily start/end_date＋Google 新聞 after:/before:，ingest(tag="backfill")；報告中 backfill 事件不進本期卡片，只進季度趨勢；announced 取最早新聞日期
-corrections.py 人工更正：config.yaml corrections（brand/model/match/set/note）→ field_sources kind=manual、conf A；collect 結束與 report 前都套用（idempotent），有變更才產生 updated 事件（tag=manual）；null＝確認錯誤保持空白；merge_panel 對 manual 欄位一律跳過
+corrections.py 人工更正：config.yaml corrections＋corrections/ 資料夾的 .xlsx／.csv（load_files／parse_rows，表頭 SHEET_COLUMNS，週報 Excel 第二頁「人工更正」由 write_template 預填本期機型）（brand/model/match/set/note）→ field_sources kind=manual、conf A；collect 結束與 report 前都套用（idempotent），有變更才產生 updated 事件（tag=manual）；null＝確認錯誤保持空白；merge_panel 對 manual 欄位一律跳過
 health.py   週報「系統健康與資料查核」：運作（排程、來源、AI／Tavily、資料量，讀 runs 表 stats）＋資料（原文依據、攔截率、多來源佐證 corroborated、來源不一致、跨欄位矛盾、重複機型、抽樣稽核）；全部程式計算，失敗不影響寄信
 ihv.py      平台適配性：cpu/gpu 廠商推算、五項評比（✓/✗/?/—，未知不等於不支援）、平台 × 面板對照表
 panel_decode.py 面板型號前綴 → 面板廠與尺寸（標示「推算」）、面板廠名稱統一

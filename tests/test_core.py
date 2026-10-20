@@ -1142,3 +1142,49 @@ def test_aligned_comparison_table():
     assert "srgb" in rows["HP OMEN 17"]["best"] and "p3" not in rows["HP OMEN 17"]["best"]
     src = (TEMPLATES / "report.html.j2").read_text()
     assert "cmp_table_m" in src and "table-layout:fixed" in src
+
+
+def test_corrections_from_excel(tmp_path):
+    import openpyxl
+    from display_intel import corrections, health
+    from display_intel.db import DB
+    d = tmp_path / "corrections"
+    d.mkdir()
+    wb = openpyxl.Workbook()
+    corrections.write_template(wb.active, [{"brand": "HP", "model": "OMEN 16 (16-k0000)", "match_size": "16.1", "match_res": "2560x1600"},
+                                           {"brand": "HP", "model": "OMEN 16 (16-k0000)", "match_size": "16.1", "match_res": "1920x1080"}])
+    ws = wb.active
+    head = [c.value for c in ws[3]]
+    col = lambda name: head.index(name) + 1
+    ws.cell(row=4, column=col("面板廠"), value="京東方")
+    ws.cell(row=4, column=col("面板型號"), value="NE161QHM-NY1")
+    ws.cell(row=4, column=col("觸控（是／否）"), value="否")
+    ws.cell(row=4, column=col("PWM（Hz）"), value="清空")
+    ws.cell(row=4, column=col("來源說明"), value="供應鏈確認")
+    ws.cell(row=6, column=col("品牌"), value="HP")           # 找不到的機型
+    ws.cell(row=6, column=col("機型"), value="不存在的機型")
+    ws.cell(row=6, column=col("刷新率（Hz）"), value=120)
+    ws.cell(row=7, column=col("品牌"), value="HP")           # 格式錯誤
+    ws.cell(row=7, column=col("機型"), value="OMEN 16")
+    ws.cell(row=7, column=col("觸控（是／否）"), value="也許")
+    wb.save(d / "我的更正.xlsx")
+    (d / "~$暫存.xlsx").write_bytes(b"x")  # Excel 暫存檔要略過
+    cfg = {"corrections_dir": str(d)}
+    its, errs = corrections.load_files(cfg)
+    assert len(its) == 2 and its[0]["match"] == {"size_inch": "16.1", "res_w": 2560, "res_h": 1600}
+    assert its[0]["set"] == {"panel_maker": "京東方", "panel_model": "NE161QHM-NY1", "touch": False, "pwm_hz": None}
+    assert any("觸控請填" in e and "第 7 列" in e for e in errs)
+    db = DB(tmp_path / "x.sqlite")
+    for res in ((2560, 1600), (1920, 1080)):
+        verify.merge_panel(db, PanelSpec(brand="HP", model="OMEN 16 (16-k0000)", size_inch=16.1, res_w=res[0], res_h=res[1],
+                                         pwm_hz=240, evidence={"size_inch": "16.1", "res_w": f"{res[0]}x{res[1]}",
+                                                               "res_h": f"{res[0]}x{res[1]}", "pwm_hz": "240"}),
+                           Confidence.C, art(url=f"https://m.com/{res[0]}"), [])
+    st = corrections.apply(db, cfg)
+    assert st["changed"] == 1 and st["unmatched"] == ["［我的更正.xlsx 第 6 列］HP 不存在的機型"]
+    qhd = next(r for r in db.all_panels() if r.spec.res_w == 2560)
+    fhd = next(r for r in db.all_panels() if r.spec.res_w == 1920)
+    assert qhd.spec.panel_maker == "BOE" and qhd.spec.touch is False and qhd.spec.pwm_hz is None
+    assert qhd.source_of("panel_maker").label == "人工更正・供應鏈確認" and fhd.spec.panel_maker is None
+    chk = health.corrections_check(db.all_panels(), cfg)
+    assert chk["level"] == "warn" and any("不存在的機型" in n for n in chk["notes"]) and any("觸控請填" in n for n in chk["notes"])

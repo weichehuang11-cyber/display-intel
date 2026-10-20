@@ -324,11 +324,11 @@ def data_quality(records: list[PanelRecord], since: datetime, now: datetime,
 def corrections_check(records: list[PanelRecord], cfg: dict) -> dict | None:
     from . import corrections
     n = len(corrections.items(cfg))
-    if not n:
-        return None
     miss, errs = corrections.unmatched(records, cfg)
     applied = sum(1 for r in records for fs in r.field_sources.values() if fs.kind == "manual")
     notes = [f"找不到機型：{m}（檢查品牌、機型名稱是否和週報上一樣）" for m in miss] + errs
+    if not n and not notes:
+        return None
     return _check("人工更正", "warn" if notes else "ok",
                   f"{n} 項更正，共 {applied} 個欄位以人工值為準" + (f"；{len(notes)} 項需要修正設定" if notes else ""), notes)
 

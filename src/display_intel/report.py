@@ -571,6 +571,19 @@ def write_excel(ctx: dict, db: DB, path: Path) -> Path:
         sheet(ws5, ["技術", "說明", f"{ctx.get('period_label', '本期')}款數", f"{ctx.get('period_label', '本期')}提及率", "前 30 天提及率"],
               [[r["feature"], r["desc"], r["count"], r["share"], r["base_share"]] for r in ctx["mentions"]])
 
+    # 人工更正範本：本期新機與關注機型先填好品牌、機型、比對尺寸與解析度，使用者只要填知道的規格
+    from .corrections import write_template
+    prefill, seen_rows = [], set()
+    for r in [x for seg in ctx.get("compare_new") or [] for x in seg["rows"]] + list((ctx.get("watch_cmp") or {}).get("rows") or []):
+        s = r["rec"].spec
+        row = {"brand": s.brand, "model": s.model, "match_size": f"{s.size_inch:g}" if s.size_inch else "",
+               "match_res": f"{s.res_w}x{s.res_h}" if s.res_w and s.res_h else ""}
+        k = tuple(row.values())
+        if s.brand and s.model and k not in seen_rows:
+            seen_rows.add(k)
+            prefill.append(row)
+    write_template(wb.create_sheet("人工更正", 1), prefill)  # 放在第二頁，方便找
+
     wsf = wb.create_sheet("欄位來源")
     rows_f = []
     for rec in db.all_panels():
