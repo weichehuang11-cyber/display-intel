@@ -337,8 +337,10 @@ def corrections_check(records: list[PanelRecord], cfg: dict) -> dict | None:
     notes = [f"找不到機型：{m}（檢查品牌、機型名稱是否和週報上一樣）" for m in miss] + errs
     if not n and not notes:
         return None
+    excluded = sum(1 for r in records if r.confidence == Confidence.E and any("排除" in f for f in r.flags))
     return _check("人工更正", "warn" if notes else "ok",
-                  f"{n} 項更正，共 {applied} 個欄位以人工值為準" + (f"；{len(notes)} 項需要修正設定" if notes else ""), notes)
+                  f"{n} 項更正，{applied} 個欄位以人工值為準" + (f"、{excluded} 款已排除（不列入報告）" if excluded else "")
+                  + (f"；{len(notes)} 項需要修正設定" if notes else ""), notes)
 
 
 def build(db: DB, cfg: dict, now: datetime, records: list[PanelRecord] | None = None, days: int = 7) -> dict:
