@@ -329,3 +329,7 @@ health:
   not_duplicates:
     - ["Vivobook S16 M3607GA", "Vivobook S16 M3607KA"]
     - ["HyperX Omen 16", "HyperX Omen Max 16"]
+    - ["Yoga Pro 9i", "Yoga Pro 9n"]            # Intel 版與 Snapdragon 版，不同機型
+    - ["Yoga 9", "Yoga 9n"]
+    - ["Predator Helios Neo 16 (PHN16-I31)", "Predator Helios Neo 16S AI"]
+    - ["Predator Helios Neo 16", "Predator Helios Neo 16S AI"]
