@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import json
+
 import pytest
 
 from display_intel import derive, verify
@@ -909,7 +911,7 @@ def test_health_filters_false_alarms():
     dups = health.possible_duplicates([a, b, c, d, d])
     assert len(dups) == 1 and "M3607GA" in dups[0]
     assert health.possible_duplicates([a, b, c, d], ignore=[["vivobook s16 m3607ka", "Vivobook S16 M3607GA"]]) == []
-    r = _rec("d5", 1, brand="HP", model="X")
+    r = _rec("d5", 1, brand="HP", model="X", refresh_hz=120, surface="matte", gpu="RTX 5060")
     assert health._conflict(r, "來源數值不一致：gpu（RTX 5060 vs RTX 5070，Tavily 搜尋）") is None
     assert health._conflict(r, "來源數值不一致：surface（matte vs anti-glare matte，A）") is None
     assert health._conflict(r, "來源數值不一致：refresh_hz（120.0 vs 144.0，Tavily 搜尋）") == "HP X：刷新率 120 vs 144（Tavily 搜尋）"
@@ -1056,7 +1058,7 @@ def test_price_fields_and_bands():
     assert s2.price_currency == "TWD" and "約 US$1,423" in price_text(s2)
     s3, flags = derive.clean_spec(PanelSpec(brand="HP", model="ZBook", price=45900, price_currency="USD",
                                             evidence={"price": "NT$45,900 起"}), text)
-    assert s3.price is None and s3.price_currency is None and flags  # US$45,900 不合理 → 價格與幣別一起移除
+    assert (s3.price, s3.price_currency) == (45900, "TWD")  # 原文寫 NT$，以原文為準（AI 判斷成 USD 也一樣）
     s4, _ = derive.clean_spec(PanelSpec(brand="HP", model="ZBook", price=999, evidence={"price": "價格 999"}), "價格 999")
     assert s4.price is None  # 認不得幣別 → 移除
     analytics.configure_price({"price": {"bands_usd": [1000, 2000]}})
@@ -1065,10 +1067,10 @@ def test_price_fields_and_bands():
             _rec("p3", 1, brand="B", model="Two", price=1500, price_currency="USD", panel_tech="IPS LCD", refresh_hz=60, touch=True),
             _rec("p4", 1, brand="C", model="Three", price=2500, price_currency="EUR", panel_tech="OLED", sdr_nits=500)]
     m = analytics.price_spec_matrix(recs)
-    assert [r["band"] for r in m["rows"]] == ["US$1,000 以下", "US$1,000–1,999", "US$2,000 以上"]
+    assert [r["band"] for r in m["rows"]] == ["<$1K", "$1K–2K", "≥$2K"]
     assert m["rows"][0]["n"] == 1 and m["rows"][0]["oled"] == (100, 1)  # 同機型取最低價、規格取最完整的選配
     assert m["rows"][1]["touch"] == (100, 1) and m["rows"][2]["sdr"] == 500
-    assert analytics._price_bucket(recs[3]) == "US$2,000 以上"
+    assert analytics._price_bucket(recs[3]) == "≥$2K"
     analytics.configure_price({})
 
 
@@ -1188,3 +1190,101 @@ def test_corrections_from_excel(tmp_path):
     assert qhd.source_of("panel_maker").label == "人工更正・供應鏈確認" and fhd.spec.panel_maker is None
     chk = health.corrections_check(db.all_panels(), cfg)
     assert chk["level"] == "warn" and any("不存在的機型" in n for n in chk["notes"]) and any("觸控請填" in n for n in chk["notes"])
+
+
+def test_week1_review_fixes(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from display_intel import health
+    from display_intel.db import DB
+    from display_intel.extract import fix_panel_source
+    # 筆電料號誤填成面板型號 → 移除（新資料與舊資料都會處理）
+    s, flags = fix_panel_source(PanelSpec(brand="LG", model="gram 14", panel_model="14Z90U-VZ85J", evidence={"panel_model": "14Z90U-VZ85J"}))
+    assert s.panel_model is None and any("筆電料號" in f for f in flags)
+    old = _rec("w1", 1, brand="LG", model="gram 14", panel_model="14Z90U-VZ85J", evidence={"panel_model": "14Z90U-VZ85J"})
+    assert verify.recheck_values(old) == ["panel_model"] and old.spec.panel_model is None
+    # 幣別以價格原文為依據，不算缺原文
+    r = _rec("w2", 0, brand="HP", model="OmniBook 5 14", price=999, price_currency="USD", evidence={"price": "$999"})
+    checks, _ = health.data_quality([r], datetime.now(timezone.utc) - timedelta(days=7), datetime.now(timezone.utc))
+    assert next(c for c in checks if c["name"] == "原文依據")["level"] == "ok"
+    # 價格不同、只是寫法不同的不算來源不一致
+    x = _rec("w3", 0, brand="Lenovo", model="Yoga 9n", refresh_hz=120, vrr_range="30-120Hz", price=999, price_currency="USD")
+    assert health._conflict(_rec("w4", 0, brand="LG", model="gram 14"), "來源數值不一致：panel_model（A vs B，a.com vs b.com）") is None
+    assert health._conflict(x, "來源數值不一致：vrr_range（30Hz to 120Hz vs 30-120Hz，a.com vs b.com）") is None
+    assert health._conflict(x, "來源數值不一致：price（2799 vs 2999，a.com vs b.com）") is None
+    assert health._conflict(x, "來源數值不一致：refresh_hz（120 vs 144，a.com vs b.com）")
+    # 每次抓新聞都失敗的來源要提醒（週二補完日不抓新聞，不列入）
+    db = DB(tmp_path / "h.sqlite")
+    now = datetime.now(timezone.utc)
+    for d, st in ((1, {"sources": {"Liliputing": 0, "The Verge": 5}, "source_errors": {"Liliputing": "403"}}),
+                  (2, {"profile": "enrich"}),
+                  (3, {"sources": {"Liliputing": 0, "The Verge": 3}, "source_errors": {"Liliputing": "403"}})):
+        db.record_run("collect", now - timedelta(days=d), now - timedelta(days=d), st) if hasattr(db, "record_run") else \
+            db.conn.execute("INSERT INTO runs (stage, started, finished, stats) VALUES (?,?,?,?)",
+                            ("collect", (now - timedelta(days=d)).isoformat(), (now - timedelta(days=d)).isoformat(), json.dumps(st)))
+    src = next(c for c in health.operations(db, {}, now) if c["name"] == "新聞來源")
+    assert src["level"] == "warn" and any("Liliputing" in n for n in src["notes"])
+
+
+def test_week1_data_errors():
+    from datetime import datetime, timedelta, timezone
+    from display_intel.collect import _too_old
+    from display_intel.extract import postprocess
+    from display_intel.schema import Extraction
+    # 幣別：原文寫 USD 就是 USD（AI 判斷成 INR 也一樣）
+    s, _ = derive.clean_spec(PanelSpec(brand="Lenovo", model="Yoga 9n", price=2999.99, price_currency="INR",
+                                       evidence={"price": "USD 2,999.99"}), "Lenovo Yoga 9n USD 2,999.99")
+    assert (s.price, s.price_currency) == (2999.99, "USD")
+    # 促銷價不收
+    s, fl = derive.clean_spec(PanelSpec(brand="Lenovo", model="IdeaPad Slim 3i", price=629.99,
+                                        evidence={"price": "$629.99 at Best Buy"}), "Lenovo IdeaPad Slim 3i $629.99 at Best Buy")
+    assert s.price is None and any("促銷價" in f for f in fl)
+    # 平板、外接螢幕不收；AIO 與一般筆電照收
+    assert derive.non_laptop_reason(PanelSpec(brand="Acer", model="Iconia Tab 11 5G", size_inch=10.95)) == "平板電腦"
+    assert derive.non_laptop_reason(PanelSpec(brand="MSI", model="MAG 272QP", size_inch=27))
+    assert derive.non_laptop_reason(PanelSpec(brand="INNOCN", model="40"))
+    assert derive.non_laptop_reason(PanelSpec(brand="Lenovo", model="ThinkPad X1 Carbon", size_inch=14)) is None
+    assert derive.non_laptop_reason(PanelSpec(brand="HP", model="OmniStudio X AIO", size_inch=27, product_type="aio")) is None
+    assert derive.non_laptop_reason(PanelSpec(brand="Apple", model="iMac", size_inch=24)) is None
+    a = art(title="Walmart Cyber Monday laptop deals", body="HP Envy 13 497.00", url="https://www.pcmag.com/deals/walmart-cyber-monday")
+    ex = Extraction(relevant=True, panels=[PanelSpec(brand="HP", model="Envy 13", price=497, price_currency="USD", evidence={"price": "497.00"}),
+                                           PanelSpec(brand="Acer", model="Iconia Tab 11", evidence={})])
+    ex2, flags = postprocess(a, ex)
+    assert len(ex2.panels) == 1 and ex2.panels[0].price is None and any("不是筆電" in f for f in flags)
+    # 舊資料：非筆電改成待確認（不列入報告）
+    old = _rec("t1", 1, brand="Acer", model="Iconia Tab 12 5G", size_inch=12.2)
+    assert verify.recheck_product(old) and old.confidence == Confidence.E
+    # 新聞搜尋：舊文章跳過
+    cfg = {"run": {"lookback_hours": 170}}
+    now = datetime.now(timezone.utc)
+    assert _too_old("https://abcnews.com/x", now - timedelta(days=400), cfg)
+    assert not _too_old("https://x.com/a", now - timedelta(days=3), cfg)
+    assert _too_old("https://www.pcmag.com/2012/01/old", None, cfg) and not _too_old("https://x.com/news/a", None, cfg)
+
+
+def test_exclude_models_and_sources(tmp_path):
+    from display_intel import corrections
+    from display_intel.db import DB
+    db = DB(tmp_path / "e.sqlite")
+    for model, url in (("Yoga 11", "https://abcnews.com/old"), ("Katana GF66", "https://www.pcmag.com/deals/walmart-cyber-monday-laptop-deals"),
+                       ("Yoga Slim 7x", "https://lenovo.com/x")):
+        verify.merge_panel(db, PanelSpec(brand="Lenovo" if "Yoga" in model else "MSI", model=model, size_inch=14,
+                                         evidence={"size_inch": "14"}), Confidence.C, art(url=url), [])
+    cfg = {"corrections": [{"brand": "Lenovo", "model": "Yoga 11", "exclude": True, "note": "2012 年舊機型"}],
+           "exclude_sources": ["pcmag.com/deals/walmart-cyber-monday-laptop-deals"]}
+    st = corrections.apply(db, cfg)
+    conf = {r.spec.model: r.confidence for r in db.all_panels()}
+    assert st["excluded"] == 2 and conf == {"Yoga 11": Confidence.E, "Katana GF66": Confidence.E, "Yoga Slim 7x": Confidence.C}
+    assert corrections.apply(db, cfg)["excluded"] == 0  # 重複套用不再處理
+    its, _ = corrections.parse_rows([["品牌", "機型", "排除（是＝不列入報告）"], ["HP", "15", "是"]], "x.xlsx")
+    assert its and its[0]["exclude"] is True
+
+
+
+def test_brand_repeats_model():
+    from display_intel.extract import normalize_identity
+    s = normalize_identity(PanelSpec(brand="Dell XPS 13", model="XPS 13"))
+    assert (s.brand, s.model) == ("Dell", "XPS 13")
+    s = normalize_identity(PanelSpec(brand="Chuwi UniBook", model="UniBook"))
+    assert (s.brand, s.model) == ("Chuwi", "UniBook")
+    s = normalize_identity(PanelSpec(brand="Dell Alienware", model="16X Aurora"))
+    assert s.brand == "Dell Alienware"

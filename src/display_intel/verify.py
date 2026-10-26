@@ -127,11 +127,19 @@ def recheck_values(rec: PanelRecord) -> list[str]:
     """舊資料套用「數字必須出現在原文片段」規則：移除片段裡沒有該數字的數值（人工更正與面板原廠規格除外）。"""
     skip = {f for f, fs in rec.field_sources.items() if fs.kind in ("manual", "panel_datasheet")} | set(rec.panel_spec_fields)
     bad = derive.unsupported_values(rec.spec, skip)
+    pm = rec.spec.panel_model or ""
+    if pm and pm[0].isdigit() and not decode(pm) and "panel_model" not in skip:
+        bad.append("panel_model")  # 筆電料號誤填成面板型號
+    if rec.spec.price_currency and not rec.spec.price and "price_currency" not in skip:
+        data = rec.spec.model_dump()
+        data["price_currency"] = None
+        rec.spec = PanelSpec(**data)  # 沒有價格的幣別直接清掉（不算錯誤）
     if not bad:
         return []
     data = rec.spec.model_dump()
     for f in bad:
-        note = f"原文片段沒有這個數字，已移除：{f}={data[f]}（依據：{str(data['evidence'].get(f) or data['evidence'].get('res_w') or '')[:40]}）"
+        why = "面板型號看起來是筆電料號" if f == "panel_model" else "原文片段沒有這個數字"
+        note = f"{why}，已移除：{f}={data[f]}（依據：{str(data['evidence'].get(f) or data['evidence'].get('res_w') or '')[:40]}）"
         data[f] = None
         data["evidence"].pop(f, None)
         rec.field_sources.pop(f, None)
@@ -142,12 +150,38 @@ def recheck_values(rec: PanelRecord) -> list[str]:
     return bad
 
 
+def recheck_product(rec: PanelRecord) -> bool:
+    """舊資料套用「只收筆電」與價格規則：平板、外接螢幕改成待確認（E，不進報告）；促銷價、幣別重新判斷。回傳是否有變更。"""
+    changed = False
+    from .extract import normalize_identity
+    fixed = normalize_identity(rec.spec)
+    if (fixed.brand, fixed.model) != (rec.spec.brand, rec.spec.model):
+        rec.spec = rec.spec.model_copy(update={"brand": fixed.brand, "model": fixed.model})
+        changed = True
+    if rec.confidence != Confidence.E and not any(fs.kind == "manual" for fs in rec.field_sources.values()):
+        why = derive.non_laptop_reason(rec.spec)
+        if why:
+            rec.confidence = Confidence.E
+            rec.flags.append(f"不是筆電，改為待確認、不列入報告（{why}）")
+            changed = True
+    if rec.spec.price and rec.source_of("price").kind != "manual":
+        cleaned, fl = derive.clean_price(rec.spec)
+        if cleaned.price != rec.spec.price or cleaned.price_currency != rec.spec.price_currency:
+            rec.spec = cleaned
+            rec.flags += [f for f in fl if f not in rec.flags]
+            if cleaned.price is None:
+                rec.field_sources.pop("price", None)
+            changed = True
+    return changed
+
+
 def rederive_all(db: DB) -> int:
     """衍生規格規則更新後，重算全部紀錄（PPI、實際尺寸、型號推算等），並套用最新的原文數值檢查。回傳有變動的筆數。"""
     n = 0
     for rec in db.all_panels():
         before = rec.model_dump_json()
         recheck_values(rec)
+        recheck_product(rec)
         rec = _derived(rec)
         if rec.model_dump_json() != before:
             db.put_panel(rec)

@@ -40,7 +40,8 @@ SHEET_COLUMNS = [
     ("SDR 亮度（nits）", "sdr_nits"), ("HDR 峰值（nits）", "hdr_peak_nits"), ("DCI-P3（%）", "dci_p3_pct"),
     ("sRGB（%）", "srgb_pct"), ("Adobe RGB（%）", "adobe_rgb_pct"), ("NTSC（%）", "ntsc_pct"), ("表面處理", "surface"),
     ("觸控（是／否）", "touch"), ("背板", "backplane"), ("色深", "color_depth_desc"), ("調光", "dimming"),
-    ("PWM（Hz）", "pwm_hz"), ("起價", "price"), ("幣別（USD、TWD…）", "price_currency"), ("來源說明", "note"),
+    ("PWM（Hz）", "pwm_hz"), ("起價", "price"), ("幣別（USD、TWD…）", "price_currency"),
+    ("排除（是＝不列入報告）", "exclude"), ("來源說明", "note"),
 ]
 _TRUE = {"是", "有", "支援", "y", "yes", "true", "✓", "v", "1"}
 _FALSE = {"否", "無", "不支援", "n", "no", "false", "✗", "x", "0"}
@@ -103,6 +104,10 @@ def parse_rows(rows: list[list], origin: str) -> tuple[list[dict], list[str]]:
         for f, v in vals.items():
             if f in ("brand", "model", "note", "match_size", "match_res") or v == "":
                 continue
+            if f == "exclude":
+                if v.lower() in _TRUE:
+                    item["exclude"] = True
+                continue
             if v in ("清空", "刪除", "null"):
                 if f == "res":
                     item["set"].update({"res_w": None, "res_h": None})
@@ -122,7 +127,7 @@ def parse_rows(rows: list[list], origin: str) -> tuple[list[dict], list[str]]:
                     errors.append(f"［{item['_origin']}］觸控請填「是」或「否」：{v}")
             else:
                 item["set"][f] = v
-        if item["set"]:
+        if item["set"] or item.get("exclude"):
             out.append(item)
     return out, errors
 
@@ -180,7 +185,7 @@ def write_template(ws, rows: list[dict] | None = None):
                 ws.cell(row=i, column=j).fill = key_fill
     last = max(4 + len(rows or []) + 50, 60)
     col = {f: get_column_letter(j) for j, (_, f) in enumerate(SHEET_COLUMNS, 1)}
-    for f, options in (("touch", "是,否,清空"), ("panel_tech", "IPS LCD,VA LCD,Mini LED LCD,OLED,Tandem OLED,清空"),
+    for f, options in (("touch", "是,否,清空"), ("exclude", "是"), ("panel_tech", "IPS LCD,VA LCD,Mini LED LCD,OLED,Tandem OLED,清空"),
                        ("surface", "AG,AGLR,AR,BV,BV+AR,清空")):
         dv = DataValidation(type="list", formula1=f'"{options}"', allow_blank=True, showErrorMessage=False)
         ws.add_data_validation(dv)
@@ -212,6 +217,8 @@ def _num(v):
 def validate(c: dict) -> tuple[dict, list[str]]:
     """檢查欄位名稱與型別；回傳（可套用的值, 錯誤說明）。"""
     errors, values = [], {}
+    if c.get("exclude"):
+        return {}, []
     for f, v in (c.get("set") or {}).items():
         if f not in PanelSpec.model_fields or f in IDENTITY or f == "evidence":
             errors.append(f"{_label(c)}：沒有「{f}」這個欄位")
@@ -232,11 +239,19 @@ def validate(c: dict) -> tuple[dict, list[str]]:
 def apply(db: DB, cfg: dict) -> dict:
     """套用全部人工更正。回傳統計（matched / changed / unmatched / errors）。"""
     from .verify import _derived
-    stats = {"items": 0, "matched": 0, "changed": 0, "unmatched": [], "errors": []}
+    stats = {"items": 0, "matched": 0, "changed": 0, "excluded": 0, "unmatched": [], "errors": []}
     corr = items(cfg)
+    records = db.all_panels()
+    # 排除來源：這些網頁（例如多年前的舊文、舊特價文）帶進來的機型不列入報告
+    for pat in cfg.get("exclude_sources") or []:
+        for rec in records:
+            doms = {fs.domain for fs in rec.field_sources.values() if fs.kind == "article"}
+            if str(pat) in rec.source_url and len(doms) <= 1 and rec.confidence != Confidence.E:
+                _exclude(rec, f"來源已排除：{pat}")
+                db.put_panel(rec)
+                stats["excluded"] += 1
     if not corr:
         return stats
-    records = db.all_panels()
     now = utcnow()
     for c in corr:
         stats["items"] += 1
@@ -247,6 +262,14 @@ def apply(db: DB, cfg: dict) -> dict:
             stats["unmatched"].append(_label(c))
             continue
         note = str(c.get("note") or "").strip()
+        if c.get("exclude"):
+            for rec in targets:
+                stats["matched"] += 1
+                if rec.confidence != Confidence.E:
+                    _exclude(rec, "人工排除" + (f"：{note}" if note else ""))
+                    db.put_panel(rec)
+                    stats["excluded"] += 1
+            continue
         for rec in targets:
             stats["matched"] += 1
             data = rec.spec.model_dump()
@@ -281,6 +304,12 @@ def apply(db: DB, cfg: dict) -> dict:
         log.info("人工更正：%d 項，套用到 %d 筆，改變 %d 筆；找不到 %s；錯誤 %s", stats["items"], stats["matched"],
                  stats["changed"], stats["unmatched"] or "無", stats["errors"] or "無")
     return stats
+
+
+def _exclude(rec: PanelRecord, why: str):
+    """改成待確認（E）：不列入報告，資料保留；原可信度記在 flags，方便恢復。"""
+    rec.flags.append(f"{why}（原可信度 {rec.confidence.value}，改為待確認、不列入報告）")
+    rec.confidence = Confidence.E
 
 
 def unmatched(records: list[PanelRecord], cfg: dict) -> tuple[list[str], list[str]]:

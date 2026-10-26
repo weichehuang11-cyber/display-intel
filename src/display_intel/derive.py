@@ -259,11 +259,47 @@ def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
     return spec, dropped
 
 
+# ---------- 不是筆電的產品（平板、外接螢幕）----------
+_TABLET_RE = re.compile(r"\btab\b|\btablet\b|\bipad\b|matepad|\bxiaoxin pad\b|平板", re.I)
+_MONITOR_RE = re.compile(r"monitor|ultrawide|顯示器|显示器|モニター|螢幕$", re.I)
+_AIO_RE = re.compile(r"\baio\b|all[\s-]?in[\s-]?one|一體機|一体机|imac|\bstudio\b", re.I)
+MONITOR_ONLY_BRANDS = {"innocn", "ktc", "aoc", "benq", "viewsonic", "eizo", "koorui", "titan army", "泰坦军团", "huntkey"}
+
+
+def non_laptop_reason(spec: PanelSpec, context: str = "") -> Optional[str]:
+    """平板或外接螢幕回傳原因；筆電、AIO 回傳 None。context 可傳入文章標題。"""
+    name = f"{spec.brand or ''} {spec.model or ''}"
+    if (spec.product_type or "").lower() == "aio" or _AIO_RE.search(name):
+        return None
+    if _TABLET_RE.search(name):
+        return "平板電腦"
+    if (spec.brand or "").strip().lower() in MONITOR_ONLY_BRANDS:
+        return "外接螢幕品牌"
+    if _MONITOR_RE.search(name) or (spec.size_inch and spec.size_inch >= 21 and _MONITOR_RE.search(context or "")):
+        return "外接螢幕"
+    if spec.size_inch and spec.size_inch >= 21:
+        return "21 吋以上且不是 AIO，多半是外接螢幕"
+    return None
+
+
 def clean_price(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
     """統一幣別；認不得幣別或換算後不合理（低於 US$150 或高於 US$10,000）就移除價格。"""
     if not spec.price:
+        if spec.price_currency:  # 沒有價格的幣別沒有意義
+            data = spec.model_dump()
+            data["price_currency"] = None
+            data["evidence"].pop("price_currency", None)
+            return PanelSpec(**data), []
         return spec, []
-    cur = normalize_currency(spec.price_currency, spec.evidence.get("price"))
+    quote = str(spec.evidence.get("price") or "")
+    if re.search(r"\bdeals?\b|\bsale\b|\bsave\b|\boff\b|discount|\bat (?:best buy|amazon|walmart|newegg|costco|target)\b|"
+                 r"cyber monday|black friday|prime day|折扣|優惠|特價|特价|促銷|促销|到手價|到手价|券後|券后|直降|限時|限时|セール", quote, re.I):
+        data = spec.model_dump()
+        data["price"] = data["price_currency"] = None
+        data["evidence"].pop("price", None)
+        return PanelSpec(**data), [f"促銷價不收（只收上市起價）：{quote[:40]}"]
+    # 原文寫的幣別（例如「USD 2,999.99」）優先於 AI 判斷
+    cur = normalize_currency(quote) or normalize_currency(spec.price_currency)
     usd = price_usd(spec.price, cur)
     data = spec.model_dump()
     if usd is None or not 150 <= usd <= 10000:

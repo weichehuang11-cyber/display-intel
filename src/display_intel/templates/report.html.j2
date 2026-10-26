@@ -214,12 +214,15 @@
 
   {% if matrix %}
   <div style="font-size:14px;font-weight:bold;margin:16px 0 6px;">品牌 × 面板廠（累計 {{ matrix.total }} 款）</div>
-  <table role="presentation" cellpadding="6" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e3e6ea;">
-    <tr style="background:#eef0f6;text-align:left;"><th>品牌</th>{% for m in matrix.makers %}<th>{{ m }}</th>{% endfor %}</tr>
+  <div style="overflow-x:auto;">
+  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #e3e6ea;">
+    <tr style="background:#eef0f6;text-align:left;"><th>品牌</th>{% for m in matrix.makers %}<th style="text-align:center;">{{ m|replace("Samsung Display", "SDC")|replace("LG Display", "LGD") }}</th>{% endfor %}</tr>
     {% for r in matrix.rows %}
     <tr style="border-top:1px solid #e3e6ea;"><td>{{ r.brand }}</td>{% for v in r.cells %}<td style="text-align:center;{% if v %}font-weight:bold;{% else %}color:#ccc;{% endif %}">{{ v if v else "·" }}</td>{% endfor %}</tr>
     {% endfor %}
   </table>
+  </div>
+  {% if matrix.inferred %}<div style="font-size:11px;color:#999;margin-top:4px;">SDC＝Samsung Display、LGD＝LG Display。</div>{% endif %}
   {% if matrix.inferred %}<div style="font-size:11px;color:#999;margin-top:4px;">其中 {{ matrix.inferred }} 款的面板廠由面板型號推算。</div>{% endif %}
   {% else %}
   <p style="font-size:13px;color:#888;margin:12px 0 4px;">品牌 × 面板廠：目前報導中提到面板廠的機型還不多，資料累積中。</p>
@@ -280,7 +283,8 @@
       {% endfor %}
     </table>
   </div>
-  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e3e6ea;margin-bottom:10px;">
+<div style="overflow-x:auto;margin-bottom:10px;">
+  <table role="presentation" cellpadding="5" cellspacing="0" width="100%" style="border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e3e6ea;">
     <tr style="background:#eef0f6;text-align:left;"><th>{{ d.name }}</th>{% for b in d.buckets %}<th style="text-align:right;">{{ b }}</th>{% endfor %}</tr>
     {% for row in d.rows %}
     <tr style="border-top:1px solid #e3e6ea;"><td style="white-space:nowrap;">{{ row.quarter }} <span style="color:#999;">n={{ row.n }}</span></td>
@@ -291,6 +295,7 @@
       {% for b in d.buckets %}{% set v = d.shift[b] %}<td style="text-align:right;color:{% if v > 0 %}#1e7d4f{% elif v < 0 %}#b42318{% else %}#999{% endif %};">{% if v > 0 %}▲{{ v }}{% elif v < 0 %}▼{{ -v }}{% else %}＝{% endif %}</td>{% endfor %}</tr>
     {% endif %}
   </table>
+  </div>
   {% endfor %}
   {% if backfill %}<div style="font-size:11px;color:#999;margin-top:2px;">歷史回溯進度：{% for q, v in backfill.quarters.items() %}{{ q }} {{ v }}{% if not loop.last %}、{% endif %}{% endfor %}{% if backfill.added %}；{{ period_label }}回溯補進 {{ backfill.added }} 款（不列入上方新機）{% endif %}{% if backfill.done == 0 %}；{{ backfill.start_on }} 起自動執行{% endif %}。</div>{% endif %}
   <div style="font-size:11px;color:#999;margin-top:2px;">占比只計算有標示該規格的機型；季變化單位為百分點。季度依發表／上市時間判斷，沒寫則用新聞日期；關注清單的既有機型若無時間不計入。</div>

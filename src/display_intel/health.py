@@ -26,7 +26,8 @@ LEVEL_RANK = {"ok": 0, "warn": 1, "bad": 2}
 _NO_EVIDENCE = {"brand", "model", "product_type", "regions", "evidence", "display_marketing_name"}
 # 來源不一致只看螢幕規格；處理器、顯卡、機型名稱不同通常是不同配置或寫法差異，不算矛盾
 _CONFLICT_SKIP = {"brand", "model", "cpu_platform", "gpu", "gpu_switching", "platform_certifications",
-                  "display_power_tech", "launch_period", "display_marketing_name", "product_type", "regions"}
+                  "display_power_tech", "launch_period", "display_marketing_name", "product_type", "regions",
+                  "price", "price_currency", "form_factor"}  # 價格因配置與地區而異；form_factor 是描述性欄位
 FIELD_NAMES = {
     "size_inch": "尺寸", "res_w": "解析度", "res_h": "解析度", "refresh_hz": "刷新率", "response_ms": "反應時間",
     "sdr_nits": "SDR 亮度", "hdr_peak_nits": "HDR 峰值", "dci_p3_pct": "DCI-P3", "srgb_pct": "sRGB",
@@ -77,17 +78,18 @@ def operations(db: DB, cfg: dict, now: datetime, days: int = 7) -> list[dict]:
         checks.append(_check("排程執行", "ok", f"蒐集 {len(runs)} 次，都有照排程執行"))
 
     # 來源：本期每次都失敗或都是 0 篇
-    if runs:
+    news_runs = [r for r in runs if r["stats"].get("sources")]  # 週二規格補完日不抓新聞，不列入
+    if news_runs:
         err_count: Counter = Counter()
         zero_count: Counter = Counter()
-        for r in runs:
+        for r in news_runs:
             for name in (r["stats"].get("source_errors") or {}):
                 err_count[name] += 1
             for name, n in (r["stats"].get("sources") or {}).items():
                 if not n:
                     zero_count[name] += 1
-        dead = sorted({n for n, c in err_count.items() if c == len(runs)})
-        empty = sorted({n for n, c in zero_count.items() if c == len(runs)} - set(dead))
+        dead = sorted({n for n, c in err_count.items() if c == len(news_runs)})
+        empty = sorted({n for n, c in zero_count.items() if c == len(news_runs)} - set(dead))
         items = [f"{n}：每次都連線失敗" for n in dead] + [f"{n}：每次都 0 篇" for n in empty]
         checks.append(_check("新聞來源", "warn" if items else "ok",
                              f"{len(items)} 個來源本期沒有貢獻資料" if items else "所有來源都有資料", items))
@@ -190,10 +192,14 @@ def _conflict(rec: PanelRecord, flag: str) -> str | None:
     if not m or m.group(1) in _CONFLICT_SKIP:
         return None
     f, a, b, src = m.groups()
+    if getattr(rec.spec, f, None) in (None, "", []):
+        return None  # 這個欄位後來已被移除或清空，舊紀錄不再列出
     a, b = (re.sub(r"(\d)\.0\b", r"\1", x) for x in (a, b))
     na, nb = re.sub(r"\W", "", a.lower()), re.sub(r"\W", "", b.lower())
     if na in nb or nb in na or "其他" in (a, b):
         return None
+    if re.findall(r"\d+(?:\.\d+)?", a) == re.findall(r"\d+(?:\.\d+)?", b) and re.search(r"\d", a):
+        return None  # 數字都一樣，只是寫法不同（30Hz to 120Hz／30-120Hz）
     return f"{rec.spec.brand} {rec.spec.model}：{FIELD_NAMES.get(f, f)} {a} vs {b}（{src}）"
 
 
@@ -266,7 +272,9 @@ def data_quality(records: list[PanelRecord], since: datetime, now: datetime,
         f = _filled(r)
         filled_total += len(f)
         miss = [x for x in f if x not in r.spec.evidence and x not in r.panel_spec_fields
-                and not (x == "res_h" and "res_w" in r.spec.evidence)]
+                and not (x == "res_h" and "res_w" in r.spec.evidence)
+                and not (x == "price_currency" and "price" in r.spec.evidence)  # 幣別以價格原文為依據
+                and r.source_of(x).kind != "manual"]
         if miss:
             no_ev.append(f"{r.spec.brand} {r.spec.model}：{', '.join(FIELD_NAMES.get(x, x) for x in miss[:5])}")
     no_ev = list(dict.fromkeys(no_ev))

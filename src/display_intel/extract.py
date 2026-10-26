@@ -14,6 +14,7 @@ from typing import Callable
 
 from pydantic import ValidationError
 
+from . import derive
 from .derive import clean_spec
 from .llm import LLM, BudgetExceeded, OutputTruncated
 from .schema import Extraction, PanelFab, PanelSpec, PlatformTech, RawArticle
@@ -172,6 +173,9 @@ def normalize_identity(spec: PanelSpec) -> PanelSpec:
     """統一品牌大小寫（Asus → ASUS），並去掉機型名稱開頭重複的品牌（Framework Framework Laptop 12）。"""
     data = spec.model_dump()
     brand = (spec.brand or "").strip()
+    model0 = (spec.model or "").strip()
+    if model0 and brand.lower().endswith(" " + model0.lower()):
+        brand = brand[: -len(model0)].strip()  # 品牌欄重複了機型名稱，例如「Dell XPS 13」＋「XPS 13」
     brand = BRAND_ALIASES.get(brand.lower(), BRAND_ALIASES.get(brand, brand))
     first = brand.split()[0].lower() if brand else ""
     if brand.lower() in BRAND_CANON:
@@ -232,6 +236,11 @@ def fix_panel_source(spec: PanelSpec) -> tuple[PanelSpec, list[str]]:
             data["panel_maker"] = None
             flags.append(f"不是已知面板廠，已移除：{maker_raw}")
     pm = (spec.panel_model or "").strip()
+    if pm and pm[0].isdigit() and not decode(pm):
+        # 面板料號都是英文字母開頭（NE、B、N、LP、ATNA…）；數字開頭的通常是筆電料號
+        data["panel_model"] = None
+        flags.append(f"面板型號看起來是筆電料號，已移除：{pm}")
+        pm = ""
     looks_like_part_no = bool(re.search(r"[A-Za-z]{1,4}\d{2,}", pm.replace(" ", "")))
     if pm and not decode(pm) and (not looks_like_part_no or len(pm.split()) >= 2):
         data["panel_model"] = None
@@ -251,7 +260,16 @@ def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[s
     flags: list[str] = []
     text = article.text
     panels = []
+    deal_page = bool(re.search(r"/deals?/|\bdeals?\b|cyber monday|black friday|prime day|特價|特价|促銷|促销",
+                               f"{article.url} {article.title}", re.I))
     for p in ex.panels:
+        why = derive.non_laptop_reason(p, article.title)
+        if why:
+            flags.append(f"不是筆電，未收錄（{why}）：{p.brand or ''} {p.model or ''}".strip())
+            continue
+        if deal_page and p.price:
+            p = p.model_copy(update={"price": None, "price_currency": None})
+            flags.append(f"促銷文章的價格不收：{p.brand} {p.model}")
         cleaned, f = clean_spec(p, text)
         flags += f
         cleaned, f = fix_panel_source(normalize_identity(cleaned))

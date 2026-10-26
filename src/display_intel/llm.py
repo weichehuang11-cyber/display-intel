@@ -163,7 +163,8 @@ class LLM:
     def probe(self) -> str:
         """執行前先用一個極短的請求確認 AI 可用，回傳 "ok" 或錯誤說明。"""
         try:
-            data = self.complete_json("只輸出 JSON。", '請回覆 {"ok": true}', retries=2)
+            # retries=4：遇到 503「需求過高」會等 10、20、30 秒重試，避免暫時壅塞就改用備用模型
+            data = self.complete_json("只輸出 JSON。", '請回覆 {"ok": true}', retries=4)
             return "ok" if data.get("ok") else f"回覆異常：{str(data)[:200]}"
         except Exception as exc:
             return f"{type(exc).__name__}：{str(exc)[:400]}"

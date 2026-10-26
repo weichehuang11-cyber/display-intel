@@ -111,10 +111,33 @@ def classify(article: RawArticle, keywords: dict) -> list[str]:
 
 # ---------- 各類來源 ----------
 
+_HOST_LOCKS: dict[str, "threading.Lock"] = {}
+_SERIAL_HOSTS = ("reddit.com",)  # 這些網站同時請求會被限流（429），改成依序抓
+
+
 def _fetch_feed(client: httpx.Client, url: str) -> list:
-    r = client.get(url)
-    r.raise_for_status()
-    return feedparser.parse(r.content).entries
+    import threading
+    import time
+    from urllib.parse import urlsplit
+    host = urlsplit(url).netloc.lower()
+    key = next((h for h in _SERIAL_HOSTS if host.endswith(h)), None)
+    lock = _HOST_LOCKS.setdefault(key, threading.Lock()) if key else None
+    if lock:
+        lock.acquire()
+    try:
+        for attempt in range(2):
+            r = client.get(url)
+            if r.status_code == 429 and attempt == 0:
+                time.sleep(min(30.0, float(r.headers.get("retry-after", 10) or 10)))
+                continue
+            r.raise_for_status()
+            if lock:
+                time.sleep(3)  # 同網站兩次請求之間稍微間隔
+            return feedparser.parse(r.content).entries
+        return []
+    finally:
+        if lock:
+            lock.release()
 
 
 def _rss_source(client, src: dict, since: datetime) -> list[RawArticle]:
@@ -148,6 +171,28 @@ def google_news_urls(cfg: dict) -> list[dict]:
     return srcs
 
 
+def _tavily_date(raw) -> datetime | None:
+    from email.utils import parsedate_to_datetime
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+    try:
+        d = datetime.fromisoformat(raw.replace("Z", "+00:00")) if raw[:4].isdigit() else parsedate_to_datetime(raw)
+    except (ValueError, TypeError):
+        return None
+    return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d
+
+
+def _too_old(url: str, published: datetime | None, cfg: dict) -> bool:
+    """新聞搜尋只收近期文章：有發布日期就看日期（超過回看天數＋3 天算舊），沒有就看網址裡的年份。"""
+    now = datetime.now(timezone.utc)
+    hours = (cfg.get("run") or {}).get("lookback_hours") or 170
+    if published:
+        return published < now - timedelta(hours=hours) - timedelta(days=3)
+    m = re.search(r"/(20\d\d)/", url)
+    return bool(m and int(m.group(1)) < now.year - 1 + (now.month > 2))
+
+
 def _tavily(client, cfg: dict) -> list[RawArticle]:
     key = env("TAVILY_API_KEY")
     tv = cfg["sources"].get("tavily") or {}
@@ -172,10 +217,15 @@ def _tavily(client, cfg: dict) -> list[RawArticle]:
                                   "max_results": tv.get("max_results", 10), "include_raw_content": "text"})
             r.raise_for_status()
             for item in r.json().get("results", []):
+                published = _tavily_date(item.get("published_date"))
+                if _too_old(item["url"], published, cfg):
+                    run["tavily_skipped_old"] = run.get("tavily_skipped_old", 0) + 1
+                    continue
                 raw = item.get("raw_content") or ""
                 out.append(RawArticle(
-                    url=canonical_url(item["url"]), title=item.get("title", ""), source="Tavily 搜尋",
-                    source_type="media", lang="en", summary=item.get("content", "")[:2000],
+                    url=canonical_url(item["url"]), title=item.get("title", ""),
+                    source=urlsplit(item["url"]).netloc.removeprefix("www.") or "Tavily 搜尋",
+                    source_type="media", lang="en", summary=item.get("content", "")[:2000], published=published,
                     content=raw, content_level="full" if len(raw) > 800 else "snippet",
                 ))
         except Exception as exc:

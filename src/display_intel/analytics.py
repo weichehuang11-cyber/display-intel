@@ -401,11 +401,14 @@ def configure_price(cfg: dict):
         PRICE_CFG["bands"] = sorted(int(b) for b in pc["bands_usd"])
 
 
+def _k(n: int) -> str:
+    return f"{n / 1000:g}K" if n >= 1000 else f"{n}"
+
+
 def band_labels() -> list[str]:
+    """價格帶名稱（美元，短寫法方便手機閱讀），例如 <$800、$800–1.2K、≥$2.5K。"""
     b = PRICE_CFG["bands"]
-    out = [f"US${b[0]:,} 以下"]
-    out += [f"US${lo:,}–{hi - 1:,}" for lo, hi in zip(b, b[1:])]
-    return out + [f"US${b[-1]:,} 以上"]
+    return [f"<${_k(b[0])}"] + [f"${_k(lo)}–{_k(hi)}" for lo, hi in zip(b, b[1:])] + [f"≥${_k(b[-1])}"]
 
 
 def rec_price_usd(r) -> float | None:
@@ -495,7 +498,8 @@ def quarterly_trends(records: list[PanelRecord], max_quarters: int = 4, min_mode
     by_q: dict[str, list] = {}
     for r in best.values():
         by_q.setdefault(quarter_of(r), []).append(r)
-    quarters = sorted(by_q)[-max_quarters:]
+    # 只列至少 3 款機型的季度（1～2 款的占比只會是 0% 或 100%，沒有參考價值）
+    quarters = [q for q in sorted(by_q) if len(by_q[q]) >= min(3, min_models)][-max_quarters:]
     usable = [q for q in quarters if len(by_q[q]) >= min_models]
     dims = []
     for name, fn, order in TREND_DIMENSIONS:

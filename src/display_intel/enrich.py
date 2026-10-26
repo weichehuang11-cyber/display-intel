@@ -468,7 +468,10 @@ def enrich(db: DB, cfg: dict, llm: LLM, limit: int, should_stop: Callable[[], bo
                 # 面板型號：先掃描剛抓到的頁面原文；還缺的話專門到評測網站搜尋一次
                 current = [r for r in db.all_panels() if same(r)]
                 found = assign_panel_ids(db, current, pages)
-                if col.get("panel_hunt", True) and any(not r.spec.panel_model for r in current) \
+                profile = (cfg.get("run") or {}).get("profile", "enrich")
+                if col.get("panel_hunt", True) and profile in col.get("panel_hunt_profiles", ["enrich"]) \
+                        and stats["panel_hunts"] < col.get("panel_hunts_per_run", 10) \
+                        and any(not r.spec.panel_model for r in current) \
                         and not any(r.panel_hunt_done for r in current if not r.spec.panel_model):
                     for r in current:
                         if not r.spec.panel_model:
@@ -476,6 +479,7 @@ def enrich(db: DB, cfg: dict, llm: LLM, limit: int, should_stop: Callable[[], bo
                             db.put_panel(r)
                     hunt = [p for p in hunt_panel(client, rep, budget) if p.url not in seen]
                     stats["panel_hunts"] += 1
+                    stats["panel_hunt_pages"] = stats.get("panel_hunt_pages", 0) + len(hunt)
                     found += assign_panel_ids(db, [r for r in db.all_panels() if same(r)], hunt)
                 stats["panel_ids"] += len(found)
                 stats["details"] += found

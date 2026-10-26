@@ -22,7 +22,7 @@ collection:
     tavily_days: 2            # Tavily 搜尋最近幾天
     tavily_queries_per_run: 10
     max_ai_calls: 30
-    enrich_models: 6          # 每次補完幾款機型（每款約用 1 次 Tavily）
+    enrich_models: 4          # 每次補完幾款機型（剛發表的新機評測還沒出，效益低；大量補完在週二）
   full:                       # 週日完整蒐集
     lookback_hours: 170
     news_window: 7d
@@ -42,6 +42,8 @@ collection:
   enrich_retry_days: 6                # 兩次補查至少間隔幾天
   enrich_within_days: 60              # 只補查 60 天內出現的機型
   panel_hunt: true                    # 缺面板型號的機型，專門到評測網站搜尋一次（每款最多 1 次 Tavily，原文掃描不花 AI）
+  panel_hunt_profiles: [enrich]       # 只在週二規格補完日做（10/19–25 一週 50 次只找到 4 個型號，集中使用）
+  panel_hunts_per_run: 10             # 每次最多專門搜尋幾款
   watch_per_run: 5                    # 每次蒐集最多幫幾款「關注機型」建檔或回查（週日加倍）
   watch_refresh_days: 30              # 關注機型每隔幾天回查一次（抓新款與規格更新）
   enrich_monthly_cap: 850             # Tavily 當月用到這個數字就暫停補查（保留餘裕給臨時需求）
@@ -84,7 +86,8 @@ sources:
   rss:
     # --- 歐美評測與科技媒體 ---
     - {name: The Verge, url: "https://www.theverge.com/rss/index.xml", type: media, lang: en}
-    - {name: Liliputing, url: "https://liliputing.com/feed", type: media, lang: en}
+    # Liliputing 直接抓會被封鎖（403），改用 Google 新聞搜尋該站文章（只有摘要）
+    - {name: Liliputing, url: "https://news.google.com/rss/search?q=site:liliputing.com+laptop+when:7d&hl=en-US&gl=US&ceid=US:en", type: media, lang: en}
     - {name: Tom's Hardware, url: "https://www.tomshardware.com/feeds/all", type: review, lang: en}
     - {name: Windows Central, url: "https://www.windowscentral.com/rss", type: media, lang: en}
     - {name: Notebookcheck, url: "https://www.notebookcheck.net/RSS-Feed-Notebook-Reviews.8156.0.html", type: review, lang: en}
@@ -282,8 +285,16 @@ report:
 #   常用欄位：panel_maker 面板廠、panel_model 面板型號、panel_tech 面板技術、refresh_hz 刷新率、
 #   sdr_nits 亮度、dci_p3_pct DCI-P3、surface 表面處理、touch 觸控（true/false）、response_ms 反應時間
 # - note：資訊來源說明（會顯示在報告的出處）
-corrections: []
-# 範例（把 corrections: [] 改成下面的格式）：
+# - exclude: true：這款不列入報告（例如舊機型、不是筆電），資料保留，要恢復告訴 Claude
+corrections:
+  # 10/26 檢查：2012 年的舊文章（abcnews）被新聞搜尋當成新機收錄
+  - {brand: Lenovo, model: Yoga 11, exclude: true, note: 2012 年舊機型}
+  - {brand: Lenovo, model: Yoga 13, exclude: true, note: 2012 年舊機型}
+  - {brand: Lenovo, model: ThinkPad Twist, exclude: true, note: 2012 年舊機型}
+# 排除來源：這些網頁帶進來的機型不列入報告（網址包含這段文字即可）
+exclude_sources:
+  - pcmag.com/deals/walmart-cyber-monday-laptop-deals   # 多年前的 Cyber Monday 特價文（Katana GF66 等舊機型）
+# 範例（照這個格式加在 corrections: 底下）：
 # corrections:
 #   - brand: HP
 #     model: OMEN 16

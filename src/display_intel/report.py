@@ -297,6 +297,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
     backfilled = sum(1 for g in grouped.values() if g["backfill"])
     grouped = {k: g for k, g in grouped.items() if not g["backfill"]}
     all_records = db.all_panels()
+    grouped = {k: g for k, g in grouped.items() if g["rec"].confidence != Confidence.E}  # 待確認（例如不是筆電）不列入
     period_new = [{"rec": g["rec"]} for g in grouped.values()
                   if g["kind"] == "new" and not g["watch_seed"] and g["rec"].confidence != Confidence.D]
     standout_lines, tags = analytics.standouts(period_new, all_records, period_start)

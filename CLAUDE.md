@@ -53,6 +53,15 @@ python -m display_intel demo # 產生 output/report-日期.html
 
 新增功能時同步加測試到 `tests/test_core.py`。
 
+## 收錄範圍（10/26 第一週檢查後加入）
+
+- `derive.non_laptop_reason`：平板、外接螢幕不收（extract.postprocess）；舊資料由 `verify.recheck_product` 改為 E（不進報告）
+- `collect._too_old`：Tavily 新聞用 published_date 過濾舊文，無日期時看網址年份；來源名稱用實際網域
+- `derive.clean_price`：促銷價不收、幣別以原文優先；促銷文章（網址 /deals/、標題 deal）的價格不收
+- `corrections`：`exclude: true`／Excel「排除」欄、`exclude_sources`（網址片段）→ 改為 E，原可信度記在 flags
+- 面板型號數字開頭＝筆電料號，移除；品牌欄重複機型名稱時切掉（normalize_identity）
+- 專門搜尋面板型號只在週二（`panel_hunt_profiles`、`panel_hunts_per_run`）；AI 測試遇 503 重試 4 次
+
 ## 已知限制與待辦
 
 - 同款機型合併：`verify.compatible` 以品牌＋正規化機型＋相容的尺寸/解析度/面板技術判斷，每次 ingest 後執行 `consolidate`
