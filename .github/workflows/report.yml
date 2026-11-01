@@ -1,4 +1,5 @@
 # 每週日產生週報，22:00 準時寄出（台灣時間 21:17 啟動，預留 GitHub 排程延遲的緩衝）
+# 寄出前會檢查今天的週日完整蒐集有沒有跑（GitHub 偶爾會漏排程），沒跑就先補跑
 # 想改回每天：cron 改成 "47 0 * * *"，並把 config.yaml 的 cadence 改成 daily、send_at 改成 "09:30"
 name: 2. 每週報告
 
@@ -36,6 +37,7 @@ jobs:
           PYTHONPATH: src
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}   # 週日完整蒐集漏跑時補跑用
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           REPORT_RECIPIENTS: ${{ secrets.REPORT_RECIPIENTS }}
@@ -45,7 +47,8 @@ jobs:
           elif [ "${{ inputs.mode }}" = "now" ]; then
             python -m display_intel report --no-wait
           else
-            python -m display_intel report
+            # 排程寄送：若 GitHub 漏掉今天的週日完整蒐集，先補跑再寄（21:54 前收工）
+            python -m display_intel report --ensure-full
           fi
       - name: 保存報告檔（可在 Actions 頁面下載）
         if: always()

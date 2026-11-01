@@ -60,6 +60,19 @@ def _rotate(items: list, n: int, offset: int) -> list:
     return [items[(start + i) % len(items)] for i in range(n)]
 
 
+def slot_date(cfg: dict, when=None):
+    """這次執行屬於哪一個「蒐集日」：台灣時間往前推 6 小時。
+
+    GitHub 排程常延遲數小時（例如 19:17 的排程拖到隔天 01:00 才跑），這樣延遲的執行仍算原本那天，
+    週日延遲到週一凌晨也還是週日的完整蒐集。
+    """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(cfg.get("schedule", {}).get("timezone", "Asia/Taipei"))
+    when = (when or datetime.now(tz)).astimezone(tz)
+    return (when - timedelta(hours=(cfg.get("collection") or {}).get("slot_shift_hours", 6))).date()
+
+
 def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
     """決定這次執行用平日輕量（light）或週日完整（full）設定，結果放在 cfg["run"]。
 
@@ -75,9 +88,10 @@ def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:
     if profile in (None, "", "auto"):
         full_day = WEEKDAYS.index(str(col.get("full_day", "sunday")).lower())
         enrich_day = col.get("enrich_day")
-        if now.weekday() == full_day:
+        weekday = slot_date(cfg, now).weekday()  # 延遲到隔天凌晨的排程仍照原本那天的模式
+        if weekday == full_day:
             profile = "full"
-        elif enrich_day and now.weekday() == WEEKDAYS.index(str(enrich_day).lower()):
+        elif enrich_day and weekday == WEEKDAYS.index(str(enrich_day).lower()):
             profile = "enrich"
         else:
             profile = "light"

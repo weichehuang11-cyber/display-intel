@@ -484,7 +484,8 @@ def test_identity_and_grouping(db, tmp_path):
     assert (s.brand, s.model) == ("ASUS", "Zenbook 14")
     s = normalize_identity(PanelSpec(brand="Framework", model="Framework Laptop 12"))
     assert s.model == "Laptop 12"
-    assert normalize_identity(PanelSpec(brand="dell alienware", model="x")).brand == "Dell alienware"
+    s2 = normalize_identity(PanelSpec(brand="dell alienware", model="x"))
+    assert (s2.brand, s2.model) == ("Dell", "Alienware x")  # Alienware 歸到 Dell
     from display_intel.report import build_report
     a = art("OMEN", "HP OMEN 15 has a 15.6-inch 1920x1080 panel and a 2560x1440 panel option.", source_type="official")
     ex = Extraction(relevant=True, panels=[
@@ -1095,7 +1096,7 @@ def test_actual_size_and_res_codes():
     assert q.res_inferred == "2560×1600" and compare_row(q)["res"] == "2560×1600*"
     from display_intel import health
     bad = _rec("s5", 1, brand="X", model="W", size_inch=16, res_w=1920, res_h=1080, panel_model="LP160WQ1-SPA1")
-    assert any("2560×1600" in i for i in health.consistency_issues(bad))
+    assert any("寬度為 2560" in i for i in health.consistency_issues(bad))
     configure_res_codes({})
 
 
@@ -1287,4 +1288,65 @@ def test_brand_repeats_model():
     s = normalize_identity(PanelSpec(brand="Chuwi UniBook", model="UniBook"))
     assert (s.brand, s.model) == ("Chuwi", "UniBook")
     s = normalize_identity(PanelSpec(brand="Dell Alienware", model="16X Aurora"))
-    assert s.brand == "Dell Alienware"
+    assert (s.brand, s.model) == ("Dell", "Alienware 16X Aurora")
+
+
+def test_week2_schedule_and_fixes(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from display_intel import health
+    from display_intel.config import apply_profile, load_config, slot_date
+    from display_intel.db import DB
+    from display_intel.extract import normalize_identity
+    from display_intel.__main__ import _already_collected
+    cfg = load_config()
+    tw = ZoneInfo("Asia/Taipei")
+    # 延遲到隔天凌晨的執行仍算原本那天、照原本的模式
+    assert slot_date(cfg, datetime(2026, 10, 29, 1, 11, tzinfo=tw)).isoformat() == "2026-10-28"
+    apply_profile(cfg, datetime(2026, 11, 2, 2, 0, tzinfo=tw))   # 週一凌晨 2 點 → 仍是週日完整蒐集
+    assert cfg["run"]["profile"] == "full"
+    apply_profile(cfg, datetime(2026, 11, 2, 19, 17, tzinfo=tw))
+    assert cfg["run"]["profile"] == "light"
+    # 備援排程：同一個蒐集日已完成同模式就跳過
+    db = DB(tmp_path / "s.sqlite")
+    now = datetime.now(timezone.utc)
+    db.conn.execute("INSERT INTO runs (stage, started, finished, stats) VALUES (?,?,?,?)",
+                    ("collect", now.isoformat(), now.isoformat(), json.dumps({"profile": "light"})))
+    assert _already_collected(db, cfg, "light") and not _already_collected(db, cfg, "full")
+    # 健康檢查：延遲的執行算原本那天，延遲列出來
+    db2 = DB(tmp_path / "h.sqlite")
+    base = datetime(2026, 10, 28, 19, 17, tzinfo=tw)
+    for started, prof in ((base + timedelta(hours=6), "light"), (base - timedelta(days=1), "enrich")):
+        db2.conn.execute("INSERT INTO runs (stage, started, finished, stats) VALUES (?,?,?,?)",
+                         ("collect", started.astimezone(timezone.utc).isoformat(), started.isoformat(), json.dumps({"profile": prof})))
+    chk = health.operations(db2, cfg, datetime(2026, 10, 29, 10, 0, tzinfo=tw), days=2)[0]
+    assert chk["name"] == "排程執行" and chk["level"] == "ok" and any("延遲 6 小時" in n for n in chk["notes"])
+    # Alienware 歸到 Dell
+    s = normalize_identity(PanelSpec(brand="Alienware", model="18 Area-51"))
+    assert (s.brand, s.model) == ("Dell", "Alienware 18 Area-51")
+    s = normalize_identity(PanelSpec(brand="Dell", model="Alienware 16X Aurora"))
+    assert (s.brand, s.model) == ("Dell", "Alienware 16X Aurora")
+    # 數值差 2% 以內不算矛盾；解析度代碼只比寬度
+    x = _rec("g1", 0, brand="Geekom", model="GeekBook X14 Pro", dci_p3_pct=100, refresh_hz=60)
+    assert health._conflict(x, "來源數值不一致：dci_p3_pct（100 vs 99.9，a.com vs b.com）") is None
+    assert health._conflict(x, "來源數值不一致：refresh_hz（60 vs 120，a.com vs b.com）")
+    sf = _rec("g2", 0, brand="Microsoft", model="Surface Laptop 13", res_w=1920, res_h=1280, panel_model="LP130WU1-SPA1")
+    assert not any("解析度代碼" in i for i in health.consistency_issues(sf))
+
+
+def test_options_with_different_refresh_stay_separate(tmp_path):
+    from display_intel.db import DB
+    db = DB(tmp_path / "o.sqlite")
+    ev = lambda **kw: {k: str(v) for k, v in kw.items()}
+    a = art(url="https://ultrabookreview.com/zenbook14")
+    verify.merge_panel(db, PanelSpec(brand="ASUS", model="Zenbook 14 UX3480AA", size_inch=14, refresh_hz=60, sdr_nits=300, touch=False,
+                                     evidence=ev(size_inch=14, refresh_hz=60, sdr_nits=300, touch="non-touch")), Confidence.B, a, [])
+    verify.merge_panel(db, PanelSpec(brand="ASUS", model="Zenbook 14 UX3480AA", size_inch=14, refresh_hz=120, sdr_nits=500, touch=True,
+                                     evidence=ev(size_inch=14, refresh_hz=120, sdr_nits=500, touch="touch")), Confidence.B, a, [])
+    recs = db.all_panels()
+    assert len(recs) == 2 and {r.spec.refresh_hz for r in recs} == {60, 120} and not any(r.flags for r in recs)
+    assert verify.consolidate(db) == 0 and len(db.all_panels()) == 2  # 合併整理時也不會併回去
+    # 同一選配的補充資料仍然合併
+    verify.merge_panel(db, PanelSpec(brand="ASUS", model="Zenbook 14 UX3480AA", size_inch=14, refresh_hz=120, dci_p3_pct=100,
+                                     evidence=ev(size_inch=14, refresh_hz=120, dci_p3_pct=100)), Confidence.C, art(url="https://x.com/z"), [])
+    assert len(db.all_panels()) == 2 and any(r.spec.dci_p3_pct == 100 and r.spec.refresh_hz == 120 for r in db.all_panels())

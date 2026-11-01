@@ -62,6 +62,14 @@ python -m display_intel demo # 產生 output/report-日期.html
 - 面板型號數字開頭＝筆電料號，移除；品牌欄重複機型名稱時切掉（normalize_identity）
 - 專門搜尋面板型號只在週二（`panel_hunt_profiles`、`panel_hunts_per_run`）；AI 測試遇 503 重試 4 次
 
+## 排程保險（11/2 第二週檢查後加入）
+
+- `config.slot_date`：台灣時間往前推 6 小時決定「蒐集日」與模式（延遲到隔天凌晨仍算原本那天）
+- collect.yml 備援 cron 20:47，排程執行帶 `--skip-if-done`（`__main__._already_collected`）
+- report.yml 排程寄送帶 `--ensure-full`：本週日沒有 full 蒐集就先補跑（`_ensure_full_collect`，寄出前 6 分鐘收工）
+- health「排程執行」用 slot_date 判斷，列出延遲 ≥2 小時與週日沒有完整蒐集
+- 同一篇文章裡刷新率或觸控不同的規格是不同選配（`verify.distinct_option`、find_existing 的 url 參數）；Alienware 品牌統一為 Dell
+
 ## 已知限制與待辦
 
 - 同款機型合併：`verify.compatible` 以品牌＋正規化機型＋相容的尺寸/解析度/面板技術判斷，每次 ingest 後執行 `consolidate`

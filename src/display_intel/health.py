@@ -62,20 +62,40 @@ def operations(db: DB, cfg: dict, now: datetime, days: int = 7) -> list[dict]:
     runs = [r for r in _runs(db, since) if r["stage"] == "collect"]
     checks = []
 
-    # 排程：預期的蒐集日（台灣時間，0=週一）
-    weekdays = set(hc.get("collect_weekdays", [0, 2, 4, 6]))
-    expected = sorted({(now - timedelta(days=i)).date() for i in range(days)
-                       if (now - timedelta(days=i)).weekday() in weekdays})
-    ran = {r["started"].astimezone(tz).date() for r in runs}
-    first = [r["started"].astimezone(tz).date() for r in _runs(db, datetime(2000, 1, 1, tzinfo=timezone.utc)) if r["stage"] == "collect"]
+    # 排程：預期的蒐集日（台灣時間，0=週一）。延遲到隔天凌晨的執行仍算原本那天（config.slot_date）
+    from .config import slot_date
+    weekdays = set(hc.get("collect_weekdays", [0, 1, 2, 4, 6]))
+    today_slot = slot_date(cfg, now)
+    expected = sorted({today_slot - timedelta(days=i) for i in range(days)
+                       if (today_slot - timedelta(days=i)).weekday() in weekdays})
+    real = [r for r in runs if not r["stats"].get("skipped")]
+    ran = {slot_date(cfg, r["started"]) for r in real}
+    first = [slot_date(cfg, r["started"]) for r in _runs(db, datetime(2000, 1, 1, tzinfo=timezone.utc)) if r["stage"] == "collect"]
     expected = [d for d in expected if first and d >= min(first)]
-    missing = [d for d in expected if d not in ran and d != now.date()]
-    if missing:
-        checks.append(_check("排程執行", "bad" if len(missing) >= 2 else "warn",
-                             f"應執行 {len(expected)} 次蒐集，缺 {len(missing)} 次",
-                             [f"{d.strftime('%m/%d')}（週{'一二三四五六日'[d.weekday()]}）沒有執行紀錄" for d in missing]))
+    sched_h, sched_m = map(int, str(hc.get("collect_time", "19:17")).split(":"))
+    missing = [d for d in expected if d not in ran and not (d == today_slot and now.astimezone(tz).hour < 23)]
+    notes = [f"{d.strftime('%m/%d')}（週{'一二三四五六日'[d.weekday()]}）沒有執行紀錄（GitHub 漏排程）" for d in missing]
+    full_day = 6
+    sundays = [d for d in expected if d.weekday() == full_day and d not in missing]
+    for d in sundays:
+        if not any(slot_date(cfg, r["started"]) == d and str(r["stats"].get("profile", "")).startswith("full") for r in real):
+            notes.append(f"{d.strftime('%m/%d')}（週日）沒有完整蒐集，只做了一般蒐集")
+    delays = []
+    for r in real:
+        local = r["started"].astimezone(tz)
+        slot = slot_date(cfg, r["started"])
+        due = datetime(slot.year, slot.month, slot.day, sched_h, sched_m, tzinfo=tz)
+        late = (local - due).total_seconds() / 3600
+        if late >= 2 and r["stats"].get("profile") and slot.weekday() in weekdays:
+            delays.append(f"{slot.strftime('%m/%d')}（週{'一二三四五六日'[slot.weekday()]}）延遲 {late:.0f} 小時才執行（GitHub 排程壅塞）")
+    if missing or len(notes) > len(missing):
+        level = "bad" if len(missing) >= 2 or any("週日" in n for n in notes) else "warn"
+        detail = f"應執行 {len(expected)} 次蒐集，缺 {len(missing)} 次" if missing else f"蒐集 {len(real)} 次都有執行"
+        if any("沒有完整蒐集" in n for n in notes):
+            detail += "，但週日完整蒐集沒有執行（週報寄出前會自動補跑）"
+        checks.append(_check("排程執行", level, detail, notes + delays))
     else:
-        checks.append(_check("排程執行", "ok", f"蒐集 {len(runs)} 次，都有照排程執行"))
+        checks.append(_check("排程執行", "ok", f"蒐集 {len(real)} 次，都有執行" + (f"（{len(delays)} 次延遲）" if delays else ""), delays))
 
     # 來源：本期每次都失敗或都是 0 篇
     news_runs = [r for r in runs if r["stats"].get("sources")]  # 週二規格補完日不抓新聞，不列入
@@ -170,8 +190,9 @@ def consistency_issues(rec: PanelRecord) -> list[str]:
     dec = decode(s.panel_model)
     if dec and dec.get("size_inch") and s.size_inch and abs(dec["size_inch"] - s.size_inch) > 0.6:
         out.append(f"面板型號 {s.panel_model} 推算為 {dec['size_inch']:g} 吋，與機型 {s.size_inch:g} 吋不符")
-    if dec and dec.get("res") and s.res_w and (s.res_w, s.res_h) != dec["res"]:
-        out.append(f"面板型號 {s.panel_model} 的解析度代碼推算為 {dec['res'][0]}×{dec['res'][1]}，與報導 {s.res_w}×{s.res_h} 不符")
+    if dec and dec.get("res") and s.res_w and s.res_w != dec["res"][0]:
+        # 只比寬度：同一個代碼可能用在不同長寬比（例如 LG 的 WU 也用在 1920×1280 的 3:2 面板）
+        out.append(f"面板型號 {s.panel_model} 的解析度代碼推算寬度為 {dec['res'][0]}，與報導 {s.res_w}×{s.res_h} 不符")
     if dec and s.panel_maker and canonical_maker(s.panel_maker) != dec["maker"]:
         out.append(f"面板型號推算為 {dec['maker']}，報導寫 {s.panel_maker}")
     if s.touch is False and s.stylus:
@@ -198,8 +219,11 @@ def _conflict(rec: PanelRecord, flag: str) -> str | None:
     na, nb = re.sub(r"\W", "", a.lower()), re.sub(r"\W", "", b.lower())
     if na in nb or nb in na or "其他" in (a, b):
         return None
-    if re.findall(r"\d+(?:\.\d+)?", a) == re.findall(r"\d+(?:\.\d+)?", b) and re.search(r"\d", a):
+    na_, nb_ = re.findall(r"\d+(?:\.\d+)?", a), re.findall(r"\d+(?:\.\d+)?", b)
+    if na_ == nb_ and na_:
         return None  # 數字都一樣，只是寫法不同（30Hz to 120Hz／30-120Hz）
+    if len(na_) == len(nb_) == 1 and float(na_[0]) and abs(float(na_[0]) - float(nb_[0])) / float(na_[0]) <= 0.02:
+        return None  # 差 2% 以內（例如 DCI-P3 100 vs 99.9）視為相同
     return f"{rec.spec.brand} {rec.spec.model}：{FIELD_NAMES.get(f, f)} {a} vs {b}（{src}）"
 
 

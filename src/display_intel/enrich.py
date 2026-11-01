@@ -190,7 +190,7 @@ def assign_panel_ids(db: DB, group: list[PanelRecord], pages: list[RawArticle]) 
             else:
                 cands = []
             if rec.spec.res_w:  # 型號裡的解析度代碼（WU、WQ…）和這個選配的解析度不同 → 排除
-                cands = [i for i in cands if not i.get("res") or i["res"] == (rec.spec.res_w, rec.spec.res_h)]
+                cands = [i for i in cands if not i.get("res") or i["res"][0] == rec.spec.res_w]  # 代碼只代表寬度級別
             if not cands and len(missing) == 1 and len(ids) == 1 and ids[0]["size_inch"] is None:
                 cands = ids  # EDID 識別碼
             if len({c["id"] for c in cands}) != 1:

@@ -54,6 +54,13 @@ def _compat(a, b, tol=0.0) -> bool:
     return abs(a - b) <= tol if isinstance(a, (int, float)) and isinstance(b, (int, float)) else a == b
 
 
+def distinct_option(a: PanelSpec, b: PanelSpec) -> bool:
+    """兩筆都有寫、但刷新率或觸控不同 → 是不同的螢幕選配（例如 60Hz 非觸控 IPS 與 120Hz 觸控 OLED）。"""
+    if a.refresh_hz and b.refresh_hz and abs(a.refresh_hz - b.refresh_hz) > 1:
+        return True
+    return a.touch is not None and b.touch is not None and a.touch != b.touch
+
+
 def compatible(a: PanelSpec, b: PanelSpec) -> bool:
     """是否可能是同一款機型的同一種面板（缺少的欄位視為相容）。"""
     if _norm(a.brand) != _norm(b.brand) or model_norm(a) != model_norm(b) or not model_norm(a):
@@ -68,12 +75,19 @@ def _richness(spec: PanelSpec) -> int:
     return sum(1 for f in SPEC_FIELDS if getattr(spec, f) not in (None, [], ""))
 
 
-def find_existing(db: DB, spec: PanelSpec) -> PanelRecord | None:
-    rec = db.get_panel(panel_key(spec))
-    if rec:
-        return rec
-    matches = [r for r in db.all_panels() if compatible(r.spec, spec)]
-    return max(matches, key=lambda r: _richness(r.spec)) if matches else None
+def find_existing(db: DB, spec: PanelSpec, url: str | None = None) -> PanelRecord | None:
+    """找同一款、同一種螢幕的紀錄。同一篇文章裡刷新率或觸控不同的，是不同的螢幕選配，不合併。"""
+    same_article_other_option = lambda r: url and r.source_url == url and distinct_option(r.spec, spec)
+    keyed = db.get_panel(panel_key(spec))
+    cands = [r for r in ([keyed] if keyed else []) + db.all_panels()
+             if (r is keyed or compatible(r.spec, spec)) and not same_article_other_option(r)]
+    if not cands:
+        return None
+    # 有多個螢幕選配時，優先挑刷新率、觸控都相符的那一個
+    fit = [r for r in cands if not distinct_option(r.spec, spec)] or cands
+    if keyed in fit:
+        return keyed
+    return max(fit, key=lambda r: _richness(r.spec))
 
 
 def confidence_for(article: RawArticle, is_rumor: bool) -> Confidence:
@@ -199,9 +213,15 @@ def merge_panel(db: DB, spec: PanelSpec, conf: Confidence, article: RawArticle, 
                 use_article_date: bool = True) -> PanelEvent | None:
     key = panel_key(spec)
     now = utcnow()
-    existing = find_existing(db, spec)
+    existing = find_existing(db, spec, article.url)
     here = FieldSource(url=article.url, source=article.source, conf=conf, at=now)
     if existing is None:
+        if db.get_panel(key):  # 同一個代碼已被另一個螢幕選配使用（例如刷新率不同）→ 加上區別
+            base, n = key, 2
+            tag = f"{spec.refresh_hz:g}hz" if spec.refresh_hz else ("touch" if spec.touch else "opt")
+            key = f"{base}|{tag}"
+            while db.get_panel(key):
+                key, n = f"{base}|{tag}{n}", n + 1
         filled = {f: here for f in SPEC_FIELDS if f not in ("brand", "model")
                   and getattr(spec, f) not in (None, [], "")}
         rec = _derived(PanelRecord(key=key, spec=spec, confidence=conf, source_url=article.url,
@@ -283,7 +303,8 @@ def consolidate(db: DB) -> int:
     kept: list[PanelRecord] = []
     removed = 0
     for r in recs:
-        target = next((k for k in kept if compatible(k.spec, r.spec)), None)
+        target = next((k for k in kept if compatible(k.spec, r.spec)
+                       and not (k.source_url == r.source_url and distinct_option(k.spec, r.spec))), None)
         if target is None:
             kept.append(r)
             continue

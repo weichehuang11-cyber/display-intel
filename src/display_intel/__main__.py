@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .config import load_config
+from .config import load_config, slot_date
 
 log = logging.getLogger("display_intel")
 
@@ -30,6 +30,45 @@ def _at_today(cfg: dict, hhmm: str) -> datetime:
     tz = ZoneInfo(cfg["schedule"].get("timezone", "Asia/Taipei"))
     h, m = map(int, hhmm.split(":"))
     return datetime.now(tz).replace(hour=h, minute=m, second=0, microsecond=0)
+
+
+def _already_collected(db, cfg: dict, profile: str) -> bool:
+    """同一個蒐集日是否已經有同模式、成功完成的蒐集（備援排程用來避免重複執行）。"""
+    import json
+    from .config import slot_date
+    today = slot_date(cfg)
+    for started, finished, stats in db.conn.execute("SELECT started, finished, stats FROM runs WHERE stage = 'collect'"):
+        s = json.loads(stats or "{}")
+        if not finished or s.get("skipped") or not str(s.get("profile", "")).startswith(profile):
+            continue
+        try:
+            t = datetime.fromisoformat(started)
+        except (TypeError, ValueError):
+            continue
+        if slot_date(cfg, t if t.tzinfo else t.replace(tzinfo=ZoneInfo("UTC"))) == today:
+            return True
+    return False
+
+
+def _ensure_full_collect(cfg: dict) -> None:
+    """週報寄出前檢查：本週的週日完整蒐集如果沒跑（GitHub 漏排程），當場補跑，跑到寄出前 6 分鐘為止。"""
+    import copy
+    from types import SimpleNamespace
+    from .db import DB
+    db = DB(cfg["report"]["database"])
+    try:
+        done = _already_collected(db, cfg, "full")
+    finally:
+        db.close()
+    if done:
+        return
+    send_at = _at_today(cfg, cfg["schedule"].get("send_at", "22:00"))
+    deadline = (send_at - timedelta(minutes=6)).strftime("%H:%M")
+    log.warning("本週的週日完整蒐集沒有執行（GitHub 排程漏掉），寄出前先補跑，%s 收工", deadline)
+    try:
+        cmd_collect(copy.deepcopy(cfg), SimpleNamespace(profile="full", skip_if_done=False, deadline=deadline))
+    except Exception:
+        log.exception("補跑完整蒐集失敗，仍用現有資料寄出週報")
 
 
 def cmd_collect(cfg: dict, args) -> int:
@@ -47,11 +86,15 @@ def cmd_collect(cfg: dict, args) -> int:
         apply_profile(cfg, profile=getattr(args, "profile", None))
         run = cfg["run"]
         cfg["llm"]["max_calls_per_run"] = run["max_ai_calls"]
+        if getattr(args, "skip_if_done", False) and _already_collected(db, cfg, run["profile"]):
+            log.info("今天（%s）的%s蒐集已經完成，這次備援排程跳過", slot_date(cfg), run["profile"])
+            stats["skipped"] = True
+            return 0
         stats["profile"] = run["profile"] + ("（展會月加碼）" if run["event_month"] else "")
         stats["tavily_queries"] = len(run["tavily_queries"])
         log.info("本次蒐集：%s，回看 %s 小時，Tavily %d 次查詢，AI 上限 %d 次",
                  stats["profile"], run["lookback_hours"], len(run["tavily_queries"]), run["max_ai_calls"])
-        deadline = _at_today(cfg, cfg["schedule"].get("collect_deadline", "08:35"))
+        deadline = _at_today(cfg, getattr(args, "deadline", None) or cfg["schedule"].get("collect_deadline", "08:35"))
         tz = deadline.tzinfo
         # 只有在「截止時間之前」啟動才套用截止時間（避免手動在深夜執行時一開始就停止）
         stop_active = datetime.now(tz) < deadline
@@ -174,6 +217,8 @@ def cmd_report(cfg: dict, args) -> int:
     from .mailer import send_report
     from .report import build_report
 
+    if getattr(args, "ensure_full", False) and (cfg.get("schedule") or {}).get("cadence") == "weekly":
+        _ensure_full_collect(cfg)  # GitHub 漏掉週日完整蒐集時，寄出前先補跑
     started = utcnow()
     db = DB(cfg["report"]["database"])
     try:
@@ -262,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=None)
     p.add_argument("--dry-run", action="store_true", help="不寄信，只產生報告檔案")
     p.add_argument("--no-wait", action="store_true", help="不等到寄送時間，立刻寄出")
+    p.add_argument("--skip-if-done", action="store_true", help="同一個蒐集日已完成同模式的蒐集就跳過（備援排程用）")
+    p.add_argument("--ensure-full", action="store_true", help="週報寄出前，若本週週日完整蒐集沒跑就先補跑")
     p.add_argument("--profile", choices=["auto", "light", "full", "enrich", "backfill"], default="auto",
                    help="蒐集模式：auto 依星期自動；light 輕量；full 完整；enrich 只補查缺少的規格；backfill 只做歷史回溯")
     args = p.parse_args(argv)

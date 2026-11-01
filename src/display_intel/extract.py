@@ -188,6 +188,10 @@ def normalize_identity(spec: PanelSpec) -> PanelSpec:
     for alias, canon in BRAND_ALIASES.items():  # 機型開頭重複中文品牌名，例如「机械革命 蛟龙16」
         if canon == brand and model.startswith(alias):
             model = model[len(alias):].strip()
+    if brand.lower() in ("alienware", "dell alienware"):
+        # Alienware 是 Dell 的子品牌：品牌統一為 Dell，機型寫成「Alienware 16X Aurora」
+        brand = "Dell"
+        model = model if model.lower().startswith("alienware") else f"Alienware {model}".strip()
     data["brand"], data["model"] = brand or None, model or None
     # 平台名稱去掉 ®™ 等符號，讓報告好讀（例如「Intel® Core™ Ultra 9 Processor 386H」→「Intel Core Ultra 9 386H」）
     for f in ("cpu_platform", "gpu"):
