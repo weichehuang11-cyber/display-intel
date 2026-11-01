@@ -263,7 +263,8 @@ def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
 _TABLET_RE = re.compile(r"\btab\b|\btablet\b|\bipad\b|matepad|\bxiaoxin pad\b|平板", re.I)
 _MONITOR_RE = re.compile(r"monitor|ultrawide|顯示器|显示器|モニター|螢幕$", re.I)
 _AIO_RE = re.compile(r"\baio\b|all[\s-]?in[\s-]?one|一體機|一体机|imac|\bstudio\b", re.I)
-MONITOR_ONLY_BRANDS = {"innocn", "ktc", "aoc", "benq", "viewsonic", "eizo", "koorui", "titan army", "泰坦军团", "huntkey"}
+MONITOR_ONLY_BRANDS = {"innocn", "ktc", "aoc", "benq", "viewsonic", "eizo", "koorui", "titan army", "泰坦军团", "huntkey", "jsaux"}
+_PORTABLE_RE = re.compile(r"portable[\s-]?monitor|/monitors?/|攜帶式螢幕|便携屏|便攜螢幕|モバイルモニター", re.I)
 
 
 def non_laptop_reason(spec: PanelSpec, context: str = "") -> Optional[str]:
@@ -275,6 +276,8 @@ def non_laptop_reason(spec: PanelSpec, context: str = "") -> Optional[str]:
         return "平板電腦"
     if (spec.brand or "").strip().lower() in MONITOR_ONLY_BRANDS:
         return "外接螢幕品牌"
+    if _PORTABLE_RE.search(context or ""):
+        return "攜帶式／外接螢幕"
     if _MONITOR_RE.search(name) or (spec.size_inch and spec.size_inch >= 21 and _MONITOR_RE.search(context or "")):
         return "外接螢幕"
     if spec.size_inch and spec.size_inch >= 21:

@@ -173,7 +173,7 @@ def recheck_product(rec: PanelRecord) -> bool:
         rec.spec = rec.spec.model_copy(update={"brand": fixed.brand, "model": fixed.model})
         changed = True
     if rec.confidence != Confidence.E and not any(fs.kind == "manual" for fs in rec.field_sources.values()):
-        why = derive.non_laptop_reason(rec.spec)
+        why = derive.non_laptop_reason(rec.spec, rec.source_url)
         if why:
             rec.confidence = Confidence.E
             rec.flags.append(f"不是筆電，改為待確認、不列入報告（{why}）")

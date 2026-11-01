@@ -1350,3 +1350,13 @@ def test_options_with_different_refresh_stay_separate(tmp_path):
     verify.merge_panel(db, PanelSpec(brand="ASUS", model="Zenbook 14 UX3480AA", size_inch=14, refresh_hz=120, dci_p3_pct=100,
                                      evidence=ev(size_inch=14, refresh_hz=120, dci_p3_pct=100)), Confidence.C, art(url="https://x.com/z"), [])
     assert len(db.all_panels()) == 2 and any(r.spec.dci_p3_pct == 100 and r.spec.refresh_hz == 120 for r in db.all_panels())
+
+
+
+def test_portable_monitor_excluded():
+    url = "https://www.tomshardware.com/monitors/portable-monitors/jsaux-flipgo-dual-screen"
+    assert derive.non_laptop_reason(PanelSpec(brand="JSAUX", model="FlipGo", size_inch=16), url)
+    assert derive.non_laptop_reason(PanelSpec(brand="Foo", model="View 16", size_inch=16), url) == "攜帶式／外接螢幕"
+    assert derive.non_laptop_reason(PanelSpec(brand="Dell", model="EC27260", size_inch=27, product_type="aio"),
+                                    "https://www.howtogeek.com/get-1000-off-dell-desktop-pc") is None
+    assert derive.non_laptop_reason(PanelSpec(brand="Anduril", model="BlueChip"), "https://techcrunch.com/2026/10/27/laptop") is None

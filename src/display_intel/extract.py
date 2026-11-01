@@ -267,7 +267,7 @@ def postprocess(article: RawArticle, ex: Extraction) -> tuple[Extraction, list[s
     deal_page = bool(re.search(r"/deals?/|\bdeals?\b|cyber monday|black friday|prime day|特價|特价|促銷|促销",
                                f"{article.url} {article.title}", re.I))
     for p in ex.panels:
-        why = derive.non_laptop_reason(p, article.title)
+        why = derive.non_laptop_reason(p, f"{article.title} {article.url}")
         if why:
             flags.append(f"不是筆電，未收錄（{why}）：{p.brand or ''} {p.model or ''}".strip())
             continue
