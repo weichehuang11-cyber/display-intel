@@ -70,6 +70,12 @@ python -m display_intel demo # 產生 output/report-日期.html
 - health「排程執行」用 slot_date 判斷，列出延遲 ≥2 小時與週日沒有完整蒐集
 - 同一篇文章裡刷新率或觸控不同的規格是不同選配（`verify.distinct_option`、find_existing 的 url 參數）；Alienware 品牌統一為 Dell
 
+## NAS（11/12 加入）
+
+- 方法 A：`nas/trigger-github.sh` 以 fine-grained PAT 呼叫 workflow_dispatch（collect：profile=auto＋skip_if_done；report：mode=scheduled → `report --ensure-full --skip-if-done`）；GitHub 原排程保留為備援，`_already_collected`／`_already_reported` 依 slot_date 避免重複
+- 方法 B：docker-compose（data、output、corrections、config.yaml 掛載；平日 `collect`、週日 `run`）
+- `doctor` 指令：檢查路徑、資料庫讀寫、資料夾寫入、金鑰是否設定（不顯示內容）
+
 ## 已知限制與待辦
 
 - 同款機型合併：`verify.compatible` 以品牌＋正規化機型＋相容的尺寸/解析度/面板技術判斷，每次 ingest 後執行 `consolidate`

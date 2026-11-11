@@ -50,6 +50,18 @@ def _already_collected(db, cfg: dict, profile: str) -> bool:
     return False
 
 
+def _already_reported(db, cfg: dict) -> bool:
+    """同一個蒐集日是否已經寄出過週報（NAS 準時觸發後，GitHub 延遲的排程就不會再寄第二封）。"""
+    for (started,) in db.conn.execute("SELECT started FROM runs WHERE stage = 'report'"):
+        try:
+            t = datetime.fromisoformat(started)
+        except (TypeError, ValueError):
+            continue
+        if slot_date(cfg, t if t.tzinfo else t.replace(tzinfo=ZoneInfo("UTC"))) == slot_date(cfg):
+            return True
+    return False
+
+
 def _ensure_full_collect(cfg: dict) -> None:
     """週報寄出前檢查：本週的週日完整蒐集如果沒跑（GitHub 漏排程），當場補跑，跑到寄出前 6 分鐘為止。"""
     import copy
@@ -217,6 +229,14 @@ def cmd_report(cfg: dict, args) -> int:
     from .mailer import send_report
     from .report import build_report
 
+    if getattr(args, "skip_if_done", False) and not args.dry_run:
+        db0 = DB(cfg["report"]["database"])
+        try:
+            if _already_reported(db0, cfg):
+                log.info("今天（%s）的週報已經寄出，這次跳過，不會重複寄信", slot_date(cfg))
+                return 0
+        finally:
+            db0.close()
     if getattr(args, "ensure_full", False) and (cfg.get("schedule") or {}).get("cadence") == "weekly":
         _ensure_full_collect(cfg)  # GitHub 漏掉週日完整蒐集時，寄出前先補跑
     started = utcnow()
@@ -286,6 +306,65 @@ def cmd_check_sources(cfg: dict, args) -> int:
     return 0
 
 
+def cmd_doctor(cfg: dict, args) -> int:
+    """自我檢查：資料夾搬動、換主機（NAS）後跑一次，確認每個路徑與設定都正確。只顯示金鑰「有沒有設定」，不顯示內容。"""
+    import os
+    import sqlite3
+    from .config import ROOT, env
+    from . import corrections
+    ok_all = True
+
+    def line(ok: bool, what: str, detail: str = "", fix: str = ""):
+        nonlocal ok_all
+        ok_all &= ok
+        print(f"{'✅' if ok else '❌'} {what}" + (f"：{detail}" if detail else ""))
+        if not ok and fix:
+            print(f"   → 修正方法：{fix}")
+
+    print(f"執行位置：{'GitHub Actions' if os.environ.get('GITHUB_ACTIONS') else '本機／NAS'}；程式資料夾：{ROOT}\n")
+    line((ROOT / "config.yaml").exists(), "設定檔", str(ROOT / "config.yaml"),
+         "config.yaml 要放在程式資料夾裡（NAS：docker-compose.yml 同一層）")
+    db_path = Path(cfg["report"]["database"])
+    if db_path.exists():
+        try:
+            con = sqlite3.connect(str(db_path))
+            n = con.execute("SELECT COUNT(*) FROM panels").fetchone()[0]
+            last = con.execute("SELECT MAX(started) FROM runs").fetchone()[0] or "（沒有紀錄）"
+            con.execute("BEGIN IMMEDIATE")
+            con.rollback()
+            con.close()
+            line(True, "資料庫", f"{db_path}（{n} 筆面板紀錄，最近一次執行 {str(last)[:16]} UTC）")
+        except Exception as exc:
+            line(False, "資料庫", f"{db_path} 無法讀寫（{type(exc).__name__}）",
+                 "檢查資料夾權限；NAS 上要讓 Docker 有這個資料夾的讀寫權限")
+    else:
+        line(False, "資料庫", f"找不到 {db_path}",
+             "把舊的 data/intel.sqlite 複製到這個位置；搬動資料夾後要一起搬 data 資料夾，否則會從零開始")
+    for name, path in (("報告輸出資料夾", Path(cfg["report"]["output_dir"])), ("人工更正資料夾", corrections.corrections_dir(cfg))):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".write-test"
+            probe.write_text("ok")
+            probe.unlink()
+            extra = ""
+            if name == "人工更正資料夾":
+                files = [p.name for p in path.iterdir() if p.suffix.lower() in (".xlsx", ".csv") and not p.name.startswith("~$")]
+                items, errs = corrections.load_files(cfg)
+                extra = f"（{len(files)} 個檔案、{len(items)} 項更正" + (f"、{len(errs)} 個格式問題" if errs else "") + "）"
+            line(True, name, f"{path}{extra}")
+        except Exception as exc:
+            line(False, name, f"{path} 無法寫入（{type(exc).__name__}）", "檢查資料夾是否存在、Docker 是否有讀寫權限")
+    for key, need in (("GEMINI_API_KEY", True), ("SMTP_USER", True), ("SMTP_PASSWORD", True), ("REPORT_RECIPIENTS", True),
+                      ("TAVILY_API_KEY", False)):
+        has = bool(env(key))
+        line(has or not need, f"金鑰 {key}", "已設定" if has else ("未設定" + ("" if need else "（選用）")),
+             "NAS：寫在程式資料夾的 .env；GitHub：Settings → Secrets")
+    now = datetime.now(ZoneInfo(cfg["schedule"].get("timezone", "Asia/Taipei")))
+    line(True, "時間", f"{now:%Y-%m-%d %H:%M}（台灣時間）；TZ={os.environ.get('TZ', '未設定')}")
+    print("\n" + ("全部正常。" if ok_all else "有項目需要修正，修好後再跑一次這個檢查。"))
+    return 0 if ok_all else 1
+
+
 def cmd_test_email(cfg: dict, args) -> int:
     from .mailer import send_report
     send_report("[顯示器情報] 測試信", "<p>收到這封信，代表寄信設定成功。</p>", [])
@@ -303,7 +382,7 @@ def cmd_demo(cfg: dict, args) -> int:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     p = argparse.ArgumentParser(prog="display_intel", description="筆電顯示器情報 agent")
-    p.add_argument("command", choices=["collect", "report", "run", "check-sources", "test-email", "demo"])
+    p.add_argument("command", choices=["collect", "report", "run", "check-sources", "test-email", "demo", "doctor"])
     p.add_argument("--config", default=None)
     p.add_argument("--dry-run", action="store_true", help="不寄信，只產生報告檔案")
     p.add_argument("--no-wait", action="store_true", help="不等到寄送時間，立刻寄出")
@@ -314,7 +393,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     cfg = load_config(args.config)
     handler = {"collect": cmd_collect, "report": cmd_report, "run": cmd_run,
-               "check-sources": cmd_check_sources, "test-email": cmd_test_email, "demo": cmd_demo}[args.command]
+               "check-sources": cmd_check_sources, "test-email": cmd_test_email, "demo": cmd_demo,
+               "doctor": cmd_doctor}[args.command]
     return handler(cfg, args)
 
 

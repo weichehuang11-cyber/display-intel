@@ -1360,3 +1360,29 @@ def test_portable_monitor_excluded():
     assert derive.non_laptop_reason(PanelSpec(brand="Dell", model="EC27260", size_inch=27, product_type="aio"),
                                     "https://www.howtogeek.com/get-1000-off-dell-desktop-pc") is None
     assert derive.non_laptop_reason(PanelSpec(brand="Anduril", model="BlueChip"), "https://techcrunch.com/2026/10/27/laptop") is None
+
+
+def test_report_skip_if_already_sent_and_doctor(tmp_path, capsys):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from display_intel.config import load_config
+    from display_intel.db import DB
+    from display_intel.__main__ import _already_reported, cmd_doctor
+    cfg = load_config()
+    db = DB(tmp_path / "r.sqlite")
+    assert not _already_reported(db, cfg)
+    now = datetime.now(timezone.utc)
+    db.conn.execute("INSERT INTO runs (stage, started, finished, stats) VALUES (?,?,?,?)",
+                    ("report", (now - timedelta(minutes=30)).isoformat(), now.isoformat(), json.dumps({"events": 3})))
+    assert _already_reported(db, cfg)   # 同一個蒐集日已寄出 → 延遲的排程不再寄第二封
+    db.conn.execute("UPDATE runs SET started = ?", ((now - timedelta(days=2)).isoformat(),))
+    assert not _already_reported(db, cfg)
+    db.conn.commit()
+    # 自我檢查：路徑都正確時，金鑰缺少會列出修正方法（不顯示金鑰內容）
+    cfg["report"]["database"] = str(tmp_path / "r.sqlite")
+    cfg["report"]["output_dir"] = str(tmp_path / "out")
+    cfg["corrections_dir"] = str(tmp_path / "corr")
+    code = cmd_doctor(cfg, SimpleNamespace())
+    out = capsys.readouterr().out
+    assert "✅ 資料庫" in out and "✅ 報告輸出資料夾" in out and "✅ 人工更正資料夾" in out
+    assert (code == 0) == ("❌" not in out)

@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = 只產生報告不寄信；now = 立刻寄出"
+        description: "test = 只產生報告不寄信；now = 立刻寄出；scheduled = 照排程（補跑週日蒐集、等到 22:00、已寄過就跳過，NAS 觸發用）"
         type: choice
-        options: [test, now]
+        options: [test, now, scheduled]
         default: test
 
 permissions:
@@ -47,8 +47,8 @@ jobs:
           elif [ "${{ inputs.mode }}" = "now" ]; then
             python -m display_intel report --no-wait
           else
-            # 排程寄送：若 GitHub 漏掉今天的週日完整蒐集，先補跑再寄（21:54 前收工）
-            python -m display_intel report --ensure-full
+            # 排程寄送（GitHub 排程或 NAS 準時觸發）：今天已寄過就跳過；週日完整蒐集漏跑就先補跑，等到 22:00 寄出
+            python -m display_intel report --ensure-full --skip-if-done
           fi
       - name: 保存報告檔（可在 Actions 頁面下載）
         if: always()

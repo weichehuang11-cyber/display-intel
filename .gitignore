@@ -4,3 +4,7 @@ __pycache__/
 .pytest_cache/
 output/
 .venv/
+
+# NAS 觸發用的 GitHub 權杖（只放在 NAS，不上傳）
+nas/github-token.txt
+nas/*.log

@@ -16,6 +16,10 @@ on:
         type: choice
         options: [auto, light, full, enrich, backfill]
         default: auto
+      skip_if_done:
+        description: "今天已跑過同模式就跳過（NAS 準時觸發用，手動執行不用勾）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # 把資料庫存回 repo
@@ -42,7 +46,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.skip_if_done }}" = "true" ]; then
             python -m display_intel collect --profile auto --skip-if-done
           else
             python -m display_intel collect --profile "${{ inputs.profile || 'auto' }}"
