@@ -5,13 +5,17 @@ name: 2. 每週報告
 
 on:
   schedule:
-    - cron: "17 13 * * 0"   # 每週日 UTC 13:17 = 台灣時間週日 21:17
+    # GitHub 免費排程常延遲 5–10 小時，所以週日排三次：最早在 22:00 前 5.5 小時內開始的那一次負責寄出，
+    # 太早開始的會交給後面的排程，已經寄過的會自動跳過，不會重複寄信
+    - cron: "47 4 * * 0"    # 台灣時間週日 12:47
+    - cron: "47 7 * * 0"    # 台灣時間週日 15:47
+    - cron: "17 13 * * 0"   # 台灣時間週日 21:17
   workflow_dispatch:
     inputs:
       mode:
-        description: "test = 只產生報告不寄信；now = 立刻寄出；scheduled = 照排程（補跑週日蒐集、等到 22:00、已寄過就跳過，NAS 觸發用）"
+        description: "test = 只產生報告不寄信；now = 立刻寄出"
         type: choice
-        options: [test, now, scheduled]
+        options: [test, now]
         default: test
 
 permissions:
@@ -24,7 +28,7 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 350   # 最早的排程可能要等 5 個多小時到 22:00 才寄出（GitHub 上限 6 小時）
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,7 +51,7 @@ jobs:
           elif [ "${{ inputs.mode }}" = "now" ]; then
             python -m display_intel report --no-wait
           else
-            # 排程寄送（GitHub 排程或 NAS 準時觸發）：今天已寄過就跳過；週日完整蒐集漏跑就先補跑，等到 22:00 寄出
+            # 排程寄送：今天已寄過就跳過；太早就交給後面的排程；週日完整蒐集還沒跑就先補跑，等到 22:00 寄出
             python -m display_intel report --ensure-full --skip-if-done
           fi
       - name: 保存報告檔（可在 Actions 頁面下載）

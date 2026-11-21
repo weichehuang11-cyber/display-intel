@@ -50,6 +50,14 @@ def _already_collected(db, cfg: dict, profile: str) -> bool:
     return False
 
 
+def _send_at_for_slot(cfg: dict) -> datetime:
+    """這個蒐集日的寄送時間（延遲到隔天凌晨的執行，寄送時間仍是前一天 22:00 → 已過就立刻寄）。"""
+    tz = ZoneInfo(cfg["schedule"].get("timezone", "Asia/Taipei"))
+    d = slot_date(cfg, datetime.now(tz))
+    hh, mm = map(int, str(cfg["schedule"].get("send_at", "22:00")).split(":"))
+    return datetime(d.year, d.month, d.day, hh, mm, tzinfo=tz)
+
+
 def _already_reported(db, cfg: dict) -> bool:
     """同一個蒐集日是否已經寄出過週報（NAS 準時觸發後，GitHub 延遲的排程就不會再寄第二封）。"""
     for (started,) in db.conn.execute("SELECT started FROM runs WHERE stage = 'report'"):
@@ -229,6 +237,7 @@ def cmd_report(cfg: dict, args) -> int:
     from .mailer import send_report
     from .report import build_report
 
+    send_at_slot = None
     if getattr(args, "skip_if_done", False) and not args.dry_run:
         db0 = DB(cfg["report"]["database"])
         try:
@@ -237,6 +246,13 @@ def cmd_report(cfg: dict, args) -> int:
                 return 0
         finally:
             db0.close()
+        # 週日有好幾個週報排程（GitHub 常延遲數小時）：最早在寄送前 window 小時內開始的那一次負責寄出
+        send_at_slot = _send_at_for_slot(cfg)
+        window = float((cfg.get("schedule") or {}).get("report_window_hours", 5.5))
+        early = (send_at_slot - datetime.now(send_at_slot.tzinfo)).total_seconds() / 3600
+        if early > window:
+            log.info("距離 %s 寄出還有 %.1f 小時，太早了，交給後面的排程", send_at_slot.strftime("%m/%d %H:%M"), early)
+            return 0
     if getattr(args, "ensure_full", False) and (cfg.get("schedule") or {}).get("cadence") == "weekly":
         _ensure_full_collect(cfg)  # GitHub 漏掉週日完整蒐集時，寄出前先補跑
     started = utcnow()
@@ -259,9 +275,10 @@ def cmd_report(cfg: dict, args) -> int:
             log.info("dry-run：不寄信。報告在 %s", Path(cfg["report"]["output_dir"]).resolve())
             return 0
 
-        send_at = _at_today(cfg, cfg["schedule"].get("send_at", "09:30"))
+        send_at = send_at_slot or _at_today(cfg, cfg["schedule"].get("send_at", "09:30"))
         wait = (send_at - datetime.now(send_at.tzinfo)).total_seconds()
-        if not args.no_wait and 0 < wait < 3 * 3600:
+        max_wait = float((cfg.get("schedule") or {}).get("report_window_hours", 5.5)) * 3600 if send_at_slot else 3 * 3600
+        if not args.no_wait and 0 < wait <= max_wait:
             log.info("等待 %.0f 分鐘，%s 準時寄出", wait / 60, send_at.strftime("%H:%M"))
             time.sleep(wait)
         send_report(ctx["subject"], html, [xlsx])

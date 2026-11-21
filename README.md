@@ -80,7 +80,7 @@ Secrets 是 GitHub 的保險箱，存進去後任何人（包括你自己）都�
 | 週一、三、五 19:17 | 輕量蒐集最近 2 天的新聞、AI 萃取規格，再補查 6 款缺規格的機型（不寄信） |
 | 週二 19:17 | **規格補完日**：不蒐集新聞，用整天的 AI 額度補查最多 30 款缺規格的機型 |
 | 週日 19:17 | 完整蒐集過去 7 天的新聞，補查 3 款機型（最晚 21:35 收工） |
-| 週日 21:17 | 產生週報，等待到 22:00 |
+| 週日 12:47／15:47／21:17 | 週報排程（GitHub 常延遲，排三次保險）：最早在 22:00 前 5.5 小時內開始的那次產生週報、等待到 22:00 |
 | 週日 22:00 | 寄出週報 |
 
 分散在一週中蒐集的好處：AI 免費額度每天重置，分散執行可以處理更多文章（週日完整蒐集會用掉當天大部分額度，所以大量補完放在週二）；只保留幾天的新聞也比較不會漏掉。展會月（1 月 CES、5–6 月 Computex、9 月 IFA）會自動多搜尋一些。
@@ -250,7 +250,7 @@ Tavily 用到 850 次時會自動暫停補完，保留至少 150 次給臨時需
 | 只想補齊既有機型的規格 | profile 選 `enrich` | 每款約 2–3 次，最多 30 款 |
 | 想立刻收到最新報告 | 「2. 每週報告」→ mode 選 `now` | 0 次 |
 
-> GitHub 的免費排程在尖峰時段可能延遲好幾個小時，偶爾甚至漏掉（例如 11/1 週日的蒐集沒有執行）。系統有三層保險：每個蒐集日 20:47 有備援排程（當天已跑過就自動跳過）；延遲到隔天凌晨的執行仍算原本那天、照原本的模式；週報寄出前會檢查週日完整蒐集，沒跑就當場補跑再寄。
+> GitHub 的免費排程常延遲 5–10 小時，偶爾甚至漏掉。系統的保險：每個蒐集日 20:47 有備援排程（當天已跑過就自動跳過）；延遲到隔天凌晨的執行仍算原本那天、照原本的模式；**週日有三個週報排程（12:47、15:47、21:17）**，在 22:00 前 5.5 小時內最早開始的那一次負責寄出——先確認週日完整蒐集，沒跑就當場補跑，再等到 22:00 準時寄出，其他排程看到已寄過就自動跳過，不會重複寄信。
 
 ---
 
@@ -317,34 +317,9 @@ Google 新聞大多只給標題和摘要，Tavily 可以抓到文章全文，解
 
 ---
 
-## 進階：用 NAS 讓排程準時
+## 進階：改在 NAS 執行（選用）
 
-GitHub 免費排程常延遲好幾個小時（11 月起每次都晚 7–10 小時，11/8 的週報到 11/9 凌晨 2:22 才寄出）。NAS 的排程是準時的，有兩種用法：
-
-### 方法 A（建議）：NAS 只負責「準時按按鈕」
-
-蒐集、寄信、資料庫、上傳人工更正 Excel 都照舊在 GitHub，NAS 只在排定時間呼叫 GitHub 開始執行（通常 1 分鐘內就會開始）。NAS 不用裝 Docker、不用放金鑰，只需要一個 GitHub 權杖。
-
-1. **產生 GitHub 權杖**：GitHub 右上頭像 →「Settings」→ 最下方「Developer settings」→「Personal access tokens」→「Fine-grained tokens」→「Generate new token」
-   - Token name：`nas-trigger`；Expiration：1 年（到期前 GitHub 會寄信提醒）
-   - Repository access：「Only select repositories」→ 選 `display-intel`
-   - Permissions → Repository permissions →「Actions」設為「Read and write」（其他都不用開）
-   - 按「Generate token」，複製那串字（只會顯示一次）
-2. **放到 NAS**：在 NAS 建一個資料夾（例如 `/volume1/docker/display-intel/nas`），放入 repo 裡的 `nas/trigger-github.sh`，並在同一個資料夾建立 `github-token.txt`，內容貼上權杖（權杖不要上傳到 GitHub、不要貼到對話裡）
-3. **設定任務排程表**（Synology：控制台 → 任務排程表 → 新增 → 排程的任務 → 使用者定義的指令碼）：
-
-   | 任務 | 時間 | 指令 |
-   |---|---|---|
-   | 蒐集 | 週一、二、三、五、日 19:17 | `sh /volume1/docker/display-intel/nas/trigger-github.sh collect` |
-   | 週報 | 週日 21:17 | `sh /volume1/docker/display-intel/nas/trigger-github.sh report` |
-
-4. **測試**：在任務上按「執行」，再到 GitHub 的 Actions 頁面看是否 1 分鐘內出現新的執行；NAS 的 `nas/trigger-history.log` 會記錄每次觸發結果
-
-GitHub 原本的排程保留當作備援：NAS 已經觸發過，GitHub 延遲的排程會自動跳過，**不會重複蒐集，也不會寄第二封週報**。
-
-### 方法 B：完全在 NAS 執行
-
-資料留在自己手上，不靠 GitHub。需要 NAS 支援 Docker（Synology 叫 Container Manager，QNAP 叫 Container Station）。
+目前全部在 GitHub 執行，不需要 NAS。若之後想改在 NAS 執行（資料留在自己手上），需要 NAS 支援 Docker（Synology 叫 Container Manager，QNAP 叫 Container Station）。
 
 1. 把整個 repo 下載到 NAS，例如 `/volume1/docker/display-intel`（這就是「程式資料夾」）
 2. 把 GitHub 上最新的 `data/intel.sqlite` 放進程式資料夾的 `data/`（否則會從零開始）
@@ -356,20 +331,8 @@ GitHub 原本的排程保留當作備援：NAS 已經觸發過，GitHub 延遲�
    | 週一、二、三、五 19:17 | `cd /volume1/docker/display-intel && docker compose run --rm agent collect` |
    | 週日 19:17 | `cd /volume1/docker/display-intel && docker compose run --rm agent run`（蒐集後等到 22:00 寄出） |
 
-5. 改用方法 B 後，到 GitHub Actions 把兩個排程按「Disable workflow」，否則會收到兩封信；人工更正的 Excel 改放 NAS 程式資料夾的 `corrections/`
-
-### NAS 資料夾搬動後怎麼檢查與修正
-
-1. **整個程式資料夾一起搬**：`data`、`output`、`corrections`、`config.yaml`、`.env`、`docker-compose.yml`（方法 A 只有 `nas` 資料夾）要放在一起，相對位置不能變
-2. **改任務排程表的路徑**：每個任務指令裡的 `/volume1/docker/display-intel` 換成新位置（Synology 的磁碟區可能變成 `/volume2/...`，可在 File Station 對資料夾按右鍵 →「內容」看完整路徑）
-3. **跑一次自我檢查**：
-   - 方法 B：`cd /新的路徑/display-intel && docker compose run --rm agent doctor`
-   - 會逐項列出設定檔、資料庫（筆數與最近執行時間）、報告資料夾、人工更正資料夾能不能讀寫，以及金鑰有沒有設定（只顯示有或沒有）；有 ❌ 會附修正方法
-   - 方法 A：在任務排程表對「蒐集」任務按「執行」，看 `nas/trigger-history.log` 是否寫「已觸發」
-4. **常見問題**：
-   - 資料庫顯示「找不到」→ `data` 資料夾沒有一起搬，或搬到別層
-   - 「無法寫入」→ 新資料夾的權限沒有給 Docker（Synology：資料夾按右鍵 →「內容」→「權限」，給 Administrators 或 root 讀寫）
-   - 報告輸出想放到共用資料夾 → 改 `docker-compose.yml` 裡 `./output` 那一行，例如 `/volume1/共用/顯示器週報:/app/output`
+5. 改用 NAS 後，到 GitHub Actions 把兩個排程按「Disable workflow」，否則會收到兩封信；人工更正的 Excel 改放 NAS 程式資料夾的 `corrections/`
+6. 資料夾搬動後：整個程式資料夾一起搬、把任務排程表的路徑改成新位置，再執行 `docker compose run --rm agent doctor` 自我檢查（逐項列出設定檔、資料庫、報告資料夾、人工更正資料夾能不能讀寫，以及金鑰有沒有設定，有 ❌ 會附修正方法）
 
 ---
 

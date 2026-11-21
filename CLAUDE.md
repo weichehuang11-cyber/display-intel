@@ -31,7 +31,7 @@ __main__.py 總控：collect / report / run / check-sources / test-email / demo
 demo.py     虛構範例資料，不需金鑰即可產生報告
 ```
 
-排程（`.github/workflows/`）：`collect.yml` 週一、二、三、五、日 19:17 台灣時間（一三五 light、週二 enrich（collection.enrich_day，避開週日 AI 額度）、週日 full、手動可選 enrich，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 21:17 啟動、等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
+排程（`.github/workflows/`）：`collect.yml` 週一、二、三、五、日 19:17 台灣時間（一三五 light、週二 enrich（collection.enrich_day，避開週日 AI 額度）、週日 full、手動可選 enrich，見 `config.yaml` 的 `collection` 與 `config.apply_profile`）；`report.yml` 週日 12:47／15:47／21:17 三個排程，最早進入 5.5 小時窗口的那次等到 22:00 寄出。兩者共用 concurrency group `database` 避免同時寫入。NAS 用 `Dockerfile` + `docker-compose.yml`，指令 `run`。
 
 ## 核心規則（修改時務必維持）
 
@@ -70,11 +70,9 @@ python -m display_intel demo # 產生 output/report-日期.html
 - health「排程執行」用 slot_date 判斷，列出延遲 ≥2 小時與週日沒有完整蒐集
 - 同一篇文章裡刷新率或觸控不同的規格是不同選配（`verify.distinct_option`、find_existing 的 url 參數）；Alienware 品牌統一為 Dell
 
-## NAS（11/12 加入）
+## NAS（選用，使用者目前不使用）
 
-- 方法 A：`nas/trigger-github.sh` 以 fine-grained PAT 呼叫 workflow_dispatch（collect：profile=auto＋skip_if_done；report：mode=scheduled → `report --ensure-full --skip-if-done`）；GitHub 原排程保留為備援，`_already_collected`／`_already_reported` 依 slot_date 避免重複
-- 方法 B：docker-compose（data、output、corrections、config.yaml 掛載；平日 `collect`、週日 `run`）
-- `doctor` 指令：檢查路徑、資料庫讀寫、資料夾寫入、金鑰是否設定（不顯示內容）
+- docker-compose（data、output、corrections、config.yaml 掛載；平日 `collect`、週日 `run`）；`doctor` 指令檢查路徑、資料庫讀寫、資料夾寫入、金鑰是否設定（不顯示內容）
 
 ## 11/21 檢查後加入
 
@@ -82,6 +80,7 @@ python -m display_intel demo # 產生 output/report-日期.html
 - 季度趨勢統一口徑：`quarterly_trends(eligible_keys=report.backfill_keys(db))`，只計入回溯找到的機型與 `launch_quarter_precise`（文章寫明季／月）的機型；`backfill.quarter_list` 季末 3 天後自動加入剛結束的季度（`auto_recent`）
 - 規格補完／關注清單的 Tavily 結果排除網址帶前年以前年份的頁面（`enrich.old_page`）；關注機型比較優先顯示最新世代（`report._generation`）
 - 重複機型提醒略過只差平台版本字尾的機型（`health._variant_pair`：7／7i／7X、5a／5i）
+- 週報週日三個 cron（台灣 12:47、15:47、21:17）＋`report --ensure-full --skip-if-done`：已寄過跳過；距寄送超過 `report_window_hours`（5.5）就交給後面的排程；否則補跑完整蒐集、等到 `_send_at_for_slot` 寄出；job timeout 350 分
 
 ## 已知限制與待辦
 

@@ -1421,3 +1421,30 @@ def test_week4_fixes():
     # 舊年份網址不收；關注清單比較顯示最新一代
     assert old_page("https://news.lenovo.com/wp-content/uploads/2022/01/x.pdf", datetime(2026, 11, 21)) and not old_page("https://x.com/2025/12/a")
     assert _generation("ThinkPad X1 Carbon Gen 13") > _generation("ThinkPad X1 Carbon Gen 9") and _generation("MacBook Air 2025")[1] == 2025
+
+
+def test_report_window_multiple_sunday_crons(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+    from display_intel import __main__ as m
+    from display_intel.config import load_config
+    tw = ZoneInfo("Asia/Taipei")
+    cfg = load_config()
+    cfg["report"]["database"] = str(tmp_path / "w.sqlite")
+    # 週一凌晨 2 點的延遲執行：寄送時間仍是週日 22:00（已過 → 立刻寄）
+    class FakeDT(datetime):
+        now_value = datetime(2026, 11, 23, 2, 0, tzinfo=tw)
+        @classmethod
+        def now(cls, tz=None):
+            return cls.now_value.astimezone(tz) if tz else cls.now_value
+    monkeypatch.setattr(m, "datetime", FakeDT)
+    import display_intel.config as c
+    monkeypatch.setattr(c, "datetime", FakeDT, raising=False)
+    assert m._send_at_for_slot(cfg) == datetime(2026, 11, 22, 22, 0, tzinfo=tw)
+    # 週日 13:00 開始：距離 22:00 還有 9 小時 → 太早，交給後面的排程（不寄、不蒐集）
+    FakeDT.now_value = datetime(2026, 11, 22, 13, 0, tzinfo=tw)
+    called = []
+    monkeypatch.setattr(m, "_ensure_full_collect", lambda cfg: called.append(1))
+    args = SimpleNamespace(dry_run=False, no_wait=False, skip_if_done=True, ensure_full=True)
+    assert m.cmd_report(cfg, args) == 0 and not called

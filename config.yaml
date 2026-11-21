@@ -8,6 +8,7 @@ schedule:
   cadence: weekly
   timezone: Asia/Taipei
   send_at: "22:00"          # 寄出時間（週報：每週日 22:00）
+  report_window_hours: 5.5  # 週日有三個週報排程（GitHub 常延遲）：在寄出前 5.5 小時內開始的那一次負責等到 22:00 寄出
   collect_deadline: "21:35" # 蒐集與萃取最晚到這個時間收工，把資料交給報告階段
 
 # 蒐集排程：週一、三、五 19:17 輕量蒐集（不寄信），週二專做規格補完，週日完整蒐集後寄週報
