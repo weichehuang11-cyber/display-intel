@@ -125,7 +125,16 @@ def _tavily(client: httpx.Client, budget: TavilyBudget, query: str, max_results:
     budget.spend()
     r = client.post("https://api.tavily.com/search", headers={"Authorization": f"Bearer {env('TAVILY_API_KEY')}"}, json=body)
     r.raise_for_status()
-    return r.json().get("results", [])
+    return [i for i in r.json().get("results", []) if not old_page(i.get("url", ""))]
+
+
+def old_page(url: str, today=None) -> bool:
+    """網址裡帶的年份早於前年（例如 /2022/01/），多半是舊世代機型的頁面，補完與關注清單都不用。"""
+    import re
+    from datetime import datetime, timezone
+    m = re.search(r"/(20\d\d)/", url or "")
+    year = (today or datetime.now(timezone.utc)).year
+    return bool(m and int(m.group(1)) < year - 1)
 
 
 def search_specs(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -> list[RawArticle]:

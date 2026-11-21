@@ -61,7 +61,7 @@ def _rotate(items: list, n: int, offset: int) -> list:
 
 
 def slot_date(cfg: dict, when=None):
-    """這次執行屬於哪一個「蒐集日」：台灣時間往前推 6 小時。
+    """這次執行屬於哪一個「蒐集日」：台灣時間往前推 12 小時（slot_shift_hours）。
 
     GitHub 排程常延遲數小時（例如 19:17 的排程拖到隔天 01:00 才跑），這樣延遲的執行仍算原本那天，
     週日延遲到週一凌晨也還是週日的完整蒐集。
@@ -70,7 +70,8 @@ def slot_date(cfg: dict, when=None):
     from zoneinfo import ZoneInfo
     tz = ZoneInfo(cfg.get("schedule", {}).get("timezone", "Asia/Taipei"))
     when = (when or datetime.now(tz)).astimezone(tz)
-    return (when - timedelta(hours=(cfg.get("collection") or {}).get("slot_shift_hours", 6))).date()
+    # GitHub 排程常延遲 7–11 小時（19:17 的排程拖到隔天清晨 6 點），12 小時才夠涵蓋
+    return (when - timedelta(hours=(cfg.get("collection") or {}).get("slot_shift_hours", 12))).date()
 
 
 def apply_profile(cfg: dict, now=None, profile: str | None = None) -> dict:

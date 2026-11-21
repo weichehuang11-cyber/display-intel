@@ -232,6 +232,15 @@ def _filled(rec: PanelRecord) -> list[str]:
             if f not in _NO_EVIDENCE and v not in (None, [], "")]
 
 
+_VARIANT_RE = re.compile(r"(\d)[aixnsAIXNS]\b")
+
+
+def _variant_pair(a: str, b: str) -> bool:
+    """只差在數字後的版本字尾（Yoga 7 / 7i / 7X、Legion 5a / 5i：Intel、AMD、Snapdragon 版）→ 不同機型，不算重複。"""
+    sa, sb = _VARIANT_RE.sub(r"\1", a or ""), _VARIANT_RE.sub(r"\1", b or "")
+    return sa.lower() == sb.lower() and (a or "").lower() != (b or "").lower()
+
+
 def _pair_key(a: str, b: str) -> frozenset:
     return frozenset(re.sub(r"\W", "", x.lower()) for x in (a, b))
 
@@ -249,7 +258,7 @@ def possible_duplicates(records: list[PanelRecord], limit: int = 8, ignore: list
         for i, a in enumerate(recs):
             for b in recs[i + 1:]:
                 na, nb = model_norm(a.spec), model_norm(b.spec)
-                if _pair_key(a.spec.model, b.spec.model) in skip:
+                if _pair_key(a.spec.model, b.spec.model) in skip or _variant_pair(a.spec.model, b.spec.model):
                     continue
                 if na == nb or re.findall(r"\d+", na) != re.findall(r"\d+", nb):
                     continue  # 同名不同螢幕選配是正常的；數字不同（P14／P16）是不同機型

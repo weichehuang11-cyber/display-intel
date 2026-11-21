@@ -36,12 +36,36 @@ def quarter_window(q: str) -> tuple[date, date]:
     return start, end
 
 
-def units(cfg: dict) -> list[dict]:
-    """所有回溯工作單位（依 config 的季度順序）。"""
+def completed_quarters(today: date | None = None, grace_days: int = 3) -> list[str]:
+    """已經結束（且過了 grace_days 天）的季度，新的在前，例如 ['2026 Q4', '2026 Q3', ...]。"""
+    today = today or datetime.now(timezone.utc).date()
+    y, q = today.year, (today.month - 1) // 3 + 1
+    out = []
+    for _ in range(8):
+        q -= 1
+        if q == 0:
+            y, q = y - 1, 4
+        if quarter_window(f"{y} Q{q}")[1] + timedelta(days=grace_days) < today:
+            out.append(f"{y} Q{q}")
+    return out
+
+
+def quarter_list(cfg: dict, today: date | None = None) -> list[str]:
+    """要回溯的季度：config 列出的季度，加上「剛結束的季度」（auto_recent，季末 3 天後自動加入，讓每季口徑一致）。"""
+    bf = cfg.get("backfill") or {}
+    qs = list(bf.get("quarters", []))
+    if bf.get("auto_recent", True):
+        recent = completed_quarters(today)[:1]
+        qs = [q for q in recent if q not in qs] + qs
+    return qs
+
+
+def units(cfg: dict, today: date | None = None) -> list[dict]:
+    """所有回溯工作單位（剛結束的季度優先，其餘依 config 的季度順序）。"""
     bf = cfg.get("backfill") or {}
     events = {int(k): v for k, v in (bf.get("events") or {}).items()}
     out = []
-    for q in bf.get("quarters", []):
+    for q in quarter_list(cfg, today):
         qn = int(q.upper().split("Q")[1])
         event = events.get(qn, "")
         for t in bf.get("tavily_queries", []):

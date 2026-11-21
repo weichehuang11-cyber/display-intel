@@ -747,6 +747,9 @@ def test_quarterly_trends(tmp_path, db):
     from display_intel.report import build_report
     for z in recs:
         db.put_panel(z)
+        # 季度趨勢只計入回溯找到的機型：模擬回溯建檔事件（已寄出過，不會出現在本期卡片）
+        db.add_event("panel", "new", {"record": z.model_dump(mode="json"), "tag": "backfill"}, "C", "", "回溯")
+    db.conn.execute("UPDATE events SET reported_at = '2026-01-01'")
     ctx, html, xlsx, _ = build_report(db, {"schedule": {"timezone": "Asia/Taipei"}, "report": {"output_dir": str(tmp_path)}})
     assert "季度趨勢" in html and "▲60" in html
     import openpyxl
@@ -790,7 +793,7 @@ def test_backfill_units_and_window():
     from display_intel import backfill
     assert backfill.quarter_window("2026 Q1") == (date(2026, 1, 1), date(2026, 3, 31))
     assert backfill.quarter_window("2025 Q4") == (date(2025, 10, 1), date(2025, 12, 31))
-    cfg = {"backfill": {"enabled": True, "start_on": "2026-11-01", "quarters": ["2026 Q1", "2025 Q4"], "events": {1: "CES"},
+    cfg = {"backfill": {"enabled": True, "auto_recent": False, "start_on": "2026-11-01", "quarters": ["2026 Q1", "2025 Q4"], "events": {1: "CES"},
                         "tavily_queries": ["{event} laptop OLED", "laptop display"],
                         "google_news_queries": [{"q": "laptop OLED", "lang": "en"}]}}
     us = backfill.units(cfg)
@@ -819,7 +822,7 @@ def test_backfill_run(db, monkeypatch, tmp_path):
     reply = {"results": [{"article_id": 1, "relevant": True, "panels": [
         {"brand": "Acme", "model": "Nova 14", "size_inch": 14, "panel_tech": "OLED", "refresh_hz": 120, "surface": "anti-glare",
          "evidence": {"size_inch": "14-inch", "panel_tech": "OLED display", "refresh_hz": "120Hz", "surface": "anti-glare"}}]}]}
-    cfg = {"backfill": {"enabled": True, "start_on": "2099-01-01", "quarters": ["2026 Q1"], "tavily_per_run": 5,
+    cfg = {"backfill": {"enabled": True, "auto_recent": False, "start_on": "2099-01-01", "quarters": ["2026 Q1"], "tavily_per_run": 5,
                         "tavily_queries": ["laptop OLED"], "google_news_queries": [{"q": "laptop OLED", "lang": "en"}]},
            "collection": {}, "keywords": KEYWORDS, "llm": {"max_chars_per_call": 50000, "max_chars_per_article": 3000}}
     assert backfill.run(db, cfg, FakeLLM([]))["stopped"].startswith("尚未到開始日期")
@@ -1386,3 +1389,35 @@ def test_report_skip_if_already_sent_and_doctor(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "✅ 資料庫" in out and "✅ 報告輸出資料夾" in out and "✅ 人工更正資料夾" in out
     assert (code == 0) == ("❌" not in out)
+
+
+def test_week4_fixes():
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    from display_intel import analytics, health
+    from display_intel.backfill import completed_quarters, quarter_list
+    from display_intel.config import load_config, slot_date
+    from display_intel.enrich import old_page
+    from display_intel.report import _generation
+    cfg = load_config()
+    tw = ZoneInfo("Asia/Taipei")
+    # 延遲 11 小時（週一 19:17 的備援拖到週二 06:31）仍算週一
+    assert slot_date(cfg, datetime(2026, 11, 17, 6, 31, tzinfo=tw)).isoformat() == "2026-11-16"
+    # 季末 3 天後自動回溯剛結束的季度
+    assert completed_quarters(date(2027, 1, 2))[0] == "2026 Q3" and completed_quarters(date(2027, 1, 5))[0] == "2026 Q4"
+    assert quarter_list({"backfill": {"quarters": ["2026 Q3"]}}, date(2027, 1, 5)) == ["2026 Q4", "2026 Q3"]
+    # 季度趨勢只計入回溯找到的或寫明上市季度的機型
+    a = _rec("q1", 0, brand="A", model="One", size_inch=14, panel_tech="OLED", launch_period="2026 Q3")
+    b = _rec("q2", 0, brand="B", model="Two", size_inch=14, panel_tech="IPS LCD")
+    b.announced = datetime(2026, 8, 1, tzinfo=tw)
+    qt = analytics.quarterly_trends([a, b], min_models=1, eligible_keys=set())
+    assert qt["models"].get("2026 Q3") == 1
+    qt = analytics.quarterly_trends([a, b], min_models=1, eligible_keys={"q2"})
+    assert qt["models"].get("2026 Q3") == 2
+    assert analytics.launch_quarter_precise(a) and not analytics.launch_quarter_precise(_rec("q3", 0, launch_period="2026"))
+    # 平台版本字尾不算重複
+    recs = [_rec(f"d{i}", 1, brand="Lenovo", model=m) for i, m in enumerate(["Yoga 7", "Yoga 7i", "Legion 5a", "Legion 5i"])]
+    assert health.possible_duplicates(recs) == []
+    # 舊年份網址不收；關注清單比較顯示最新一代
+    assert old_page("https://news.lenovo.com/wp-content/uploads/2022/01/x.pdf", datetime(2026, 11, 21)) and not old_page("https://x.com/2025/12/a")
+    assert _generation("ThinkPad X1 Carbon Gen 13") > _generation("ThinkPad X1 Carbon Gen 9") and _generation("MacBook Air 2025")[1] == 2025

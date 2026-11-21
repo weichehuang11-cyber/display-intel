@@ -484,13 +484,26 @@ TREND_DIMENSIONS = [
 ]
 
 
-def quarterly_trends(records: list[PanelRecord], max_quarters: int = 4, min_models: int = 5) -> dict:
-    """各季新機的規格分布與季對季變化（百分點）。以機型為單位，每款取資料最完整的選配。"""
+def launch_quarter_precise(rec: PanelRecord) -> bool:
+    """文章是否寫明到「季」或「月」的上市時間（只寫年份不算）。"""
+    lp = rec.spec.launch_period or ""
+    return bool(_re.search(r"20\d\d\D{0,3}[Qq][1-4]|[Qq][1-4]\D{0,3}20\d\d|20\d\d[-/年.\s]*\d{1,2}", lp))
+
+
+def quarterly_trends(records: list[PanelRecord], max_quarters: int = 4, min_models: int = 5,
+                     eligible_keys: set | None = None) -> dict:
+    """各季新機的規格分布與季對季變化（百分點）。以機型為單位，每款取資料最完整的選配。
+
+    eligible_keys：統一口徑——只計入「回溯搜尋（新機發表新聞）找到的機型」與「文章寫明上市季度／月份」的機型。
+    平常新聞會混進評測、討論與舊機型，若直接以蒐集日期計入當季，會讓當季的分布失真。
+    """
     from .verify import _norm, model_norm
     best: dict = {}
     for r in records:
         q = quarter_of(r)
         if not q or r.confidence.rank < Confidence.C.rank:
+            continue
+        if eligible_keys is not None and r.key not in eligible_keys and not launch_quarter_precise(r):
             continue
         k = (_norm(r.spec.brand), model_norm(r.spec))
         if k not in best or completeness(r)[0] > completeness(best[k])[0]:

@@ -76,6 +76,13 @@ python -m display_intel demo # 產生 output/report-日期.html
 - 方法 B：docker-compose（data、output、corrections、config.yaml 掛載；平日 `collect`、週日 `run`）
 - `doctor` 指令：檢查路徑、資料庫讀寫、資料夾寫入、金鑰是否設定（不顯示內容）
 
+## 11/21 檢查後加入
+
+- `slot_shift_hours` 預設 12（GitHub 延遲到 7–11 小時）
+- 季度趨勢統一口徑：`quarterly_trends(eligible_keys=report.backfill_keys(db))`，只計入回溯找到的機型與 `launch_quarter_precise`（文章寫明季／月）的機型；`backfill.quarter_list` 季末 3 天後自動加入剛結束的季度（`auto_recent`）
+- 規格補完／關注清單的 Tavily 結果排除網址帶前年以前年份的頁面（`enrich.old_page`）；關注機型比較優先顯示最新世代（`report._generation`）
+- 重複機型提醒略過只差平台版本字尾的機型（`health._variant_pair`：7／7i／7X、5a／5i）
+
 ## 已知限制與待辦
 
 - 同款機型合併：`verify.compatible` 以品牌＋正規化機型＋相容的尺寸/解析度/面板技術判斷，每次 ingest 後執行 `consolidate`

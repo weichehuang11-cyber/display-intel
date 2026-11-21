@@ -291,6 +291,9 @@ corrections:
   - {brand: Lenovo, model: Yoga 11, exclude: true, note: 2012 年舊機型}
   - {brand: Lenovo, model: Yoga 13, exclude: true, note: 2012 年舊機型}
   - {brand: Lenovo, model: ThinkPad Twist, exclude: true, note: 2012 年舊機型}
+  # 11/21 檢查：關注清單每月更新時搜到的舊世代型錄
+  - {brand: Lenovo, model: ThinkPad X1 Carbon Gen 9, exclude: true, note: 2021 年舊世代}
+  - {brand: Lenovo, model: ThinkPad X1 Carbon Gen 10, exclude: true, note: 2022 年舊世代}
 # 排除來源：這些網頁帶進來的機型不列入報告（網址包含這段文字即可）
 exclude_sources:
   - pcmag.com/deals/walmart-cyber-monday-laptop-deals   # 多年前的 Cyber Monday 特價文（Katana GF66 等舊機型）

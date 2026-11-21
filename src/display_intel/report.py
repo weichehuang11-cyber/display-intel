@@ -95,6 +95,17 @@ OTHER_COLOR = "#c9c8c2"
 _DARK_INK = {"#1baf7a", "#eda100", "#e87ba4", OTHER_COLOR}  # 淺色底用深色字
 
 
+def backfill_keys(db) -> set:
+    """被回溯搜尋（各季新機發表新聞）找到過的紀錄：季度趨勢只用這些與寫明上市季度的機型，口徑一致。"""
+    keys = set()
+    for (payload,) in db.conn.execute("SELECT payload FROM events WHERE category = 'panel' AND payload LIKE '%\"tag\": \"backfill\"%'"):
+        try:
+            keys.add(json.loads(payload)["record"]["key"])
+        except (KeyError, ValueError, TypeError):
+            continue
+    return keys
+
+
 def trend_bars(qt: dict) -> dict:
     """幫每個趨勢項目加上橫條分段（segments）與圖例（legend）。"""
     for d in qt.get("dims", []):
@@ -252,7 +263,8 @@ def watch_rows(db: DB, cfg: dict, records: list[PanelRecord], updated_keys: set[
             rows.append({"name": item["name"], "models": "", "screen": "", "score": "—", "score_pct": 0, "updated": False,
                          "status": "查無規格頁，下次回查再試" if checked else "排隊建檔中"})
             continue
-        best = max(recs, key=lambda r: analytics.completeness(r)[0])
+        # 同一系列有好幾代時，先比世代（Gen 數字、年份），再比資料完整度：比較表顯示最新一代
+        best = max(recs, key=lambda r: (_generation(r.spec.model), analytics.completeness(r)[0]))
         k, t = analytics.completeness(best)
         models = list(dict.fromkeys(r.spec.model for r in recs if r.spec.model))
         card = panel_card(best)
@@ -350,7 +362,7 @@ def build_context(events: list[dict], db: DB, cfg: dict, today: datetime) -> dic
         "rumor_tracker": analytics.rumor_tracker(all_records, today),
         "to_fill": analytics.to_fill(all_records, today),
         "platform_matrix": ihv.platform_matrix(all_records, today),
-        "quarterly": trend_bars(analytics.quarterly_trends(all_records)),
+        "quarterly": trend_bars(analytics.quarterly_trends(all_records, eligible_keys=backfill_keys(db))),
         "price_matrix": analytics.price_spec_matrix(all_records),
         "backfill": backfill_status(db, cfg, backfilled),
         "watch": watch_rows(db, cfg, all_records, set(grouped)),
@@ -804,6 +816,14 @@ def _stripe(rows: list[dict]):
         if r["label"]:
             on = not on
         r["stripe"] = on
+
+
+def _generation(model: str | None) -> tuple:
+    """機型名稱裡的世代：(Gen 數字, 年份)。例如 ThinkPad X1 Carbon Gen 13 → (13, 0)；MacBook Air 2022 → (0, 2022)。"""
+    import re
+    m = re.search(r"\bgen(?:eration)?\s*(\d{1,2})\b|第\s*(\d{1,2})\s*代", model or "", re.I)
+    y = re.search(r"\b(20[1-3]\d)\b", model or "")
+    return (int(m.group(1) or m.group(2)) if m else 0, int(y.group(1)) if y else 0)
 
 
 def watch_comparison(db: DB, cfg: dict, records: list[PanelRecord], updated_keys: set[str]) -> dict:
