@@ -52,6 +52,6 @@
 
 ## 退回機制
 
-- 修正前：`git tag pre-audit-日期 origin/main && git push origin pre-audit-日期`
+- 修正前：`git push origin origin/main:refs/heads/pre-audit/日期`（保留修正前的樣子；這個環境不能推 tag，所以用分支）
 - 所有修正壓成一個 commit，標題 `audit: 日期 一句話摘要`，直接推到 main。資料庫不在稽核 commit 裡（新規則會在下次蒐集時由 `rederive_all` 套用到舊資料）。
 - 退回：GitHub → Actions → **退回稽核修正** → Run workflow（日期空白＝最近一次）。或對 Claude 說「退回 11/27 的稽核」。

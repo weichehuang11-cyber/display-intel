@@ -1,6 +1,6 @@
 name: 退回稽核修正
 
-# 每週稽核修正都是一個「audit: 日期」的 commit，修正前會打一個 pre-audit-日期 的標籤。
+# 每週稽核修正都是一個「audit: 日期」的 commit，修正前會保留一個 pre-audit/日期 分支。
 # 覺得哪一週的修正有問題：Actions → 退回稽核修正 → Run workflow → 填日期（空白＝最近一次）→ Run。
 # 只撤銷那一週的程式修正，不動資料庫（data/intel.sqlite）和你之後自己做的修改。
 on:
