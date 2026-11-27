@@ -1448,3 +1448,37 @@ def test_report_window_multiple_sunday_crons(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_ensure_full_collect", lambda cfg: called.append(1))
     args = SimpleNamespace(dry_run=False, no_wait=False, skip_if_done=True, ensure_full=True)
     assert m.cmd_report(cfg, args) == 0 and not called
+
+
+# ---------- 11/27 稽核 ----------
+def test_monitor_labeled_aio_is_excluded():
+    from display_intel import derive
+    from display_intel.schema import PanelSpec
+    for brand, model, size in [("Samsung", "Odyssey G80HF", 27), ("Acer", "Predator X27U W1", 27),
+                               ("Dell", "Alienware AW3426DW", 34), ("LG", "34-inch 1440p ultrawide USB-C", 34)]:
+        assert derive.non_laptop_reason(PanelSpec(brand=brand, model=model, product_type="aio", size_inch=size))
+    for brand, model in [("Apple", "iMac M6"), ("Lenovo", "IdeaCentre AIO 27"), ("ASUS", "AiO VM441QA"), ("Lenovo", "A100")]:
+        assert derive.non_laptop_reason(PanelSpec(brand=brand, model=model, product_type="aio", size_inch=24)) is None
+
+
+def test_surface_code_japanese_and_glare():
+    from display_intel import derive
+    assert derive.surface_code("非光沢") == "AG"
+    assert derive.surface_code("アンチグレア") == "AG"
+    assert derive.surface_code("光沢") == "BV"
+    assert derive.surface_code("Glare") == "BV"
+    assert derive.surface_code("反射防止コート") == "AR"
+
+
+def test_alienware_chinese_brand():
+    from display_intel.extract import normalize_identity
+    from display_intel.schema import PanelSpec
+    s = normalize_identity(PanelSpec(brand="外星人", model="星刃15"))
+    assert (s.brand, s.model) == ("Dell", "Alienware 星刃15")
+
+
+def test_rog_and_japan_hp_brand():
+    from display_intel.extract import normalize_identity
+    from display_intel.schema import PanelSpec
+    assert (lambda s: (s.brand, s.model))(normalize_identity(PanelSpec(brand="ROG", model="Zephyrus G14"))) == ("ASUS", "ROG Zephyrus G14")
+    assert normalize_identity(PanelSpec(brand="日本HP", model="OmniBook 5")).brand == "HP"

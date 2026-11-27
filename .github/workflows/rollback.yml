@@ -1,0 +1,46 @@
+name: 退回稽核修正
+
+# 每週稽核修正都是一個「audit: 日期」的 commit，修正前會打一個 pre-audit-日期 的標籤。
+# 覺得哪一週的修正有問題：Actions → 退回稽核修正 → Run workflow → 填日期（空白＝最近一次）→ Run。
+# 只撤銷那一週的程式修正，不動資料庫（data/intel.sqlite）和你之後自己做的修改。
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '要退回的稽核日期，例如 2026-11-27（空白＝最近一次）'
+        required: false
+        default: ''
+
+concurrency:
+  group: database
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 300
+      - name: 撤銷那一週的稽核修正
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          DATE="${{ inputs.date }}"
+          if [ -z "$DATE" ]; then
+            DATE=$(git log --format=%s --grep='^audit: [0-9]\{4\}-' -n 1 | sed -E 's/^audit: ([0-9-]{10}).*/\1/')
+          fi
+          [ -n "$DATE" ] || { echo "找不到任何稽核修正"; exit 1; }
+          COMMITS=$(git log --format=%H --grep="^audit: $DATE")
+          [ -n "$COMMITS" ] || { echo "找不到 $DATE 的稽核修正（commit 標題要是「audit: $DATE …」）"; exit 1; }
+          echo "要撤銷的修正："; git log --oneline --grep="^audit: $DATE"
+          for c in $COMMITS; do
+            git revert --no-commit "$c" || { echo "撤銷時和之後的修改衝突，沒有變更任何東西。請把這段訊息給 Claude 處理。"; git revert --abort; exit 1; }
+          done
+          git commit -q -m "rollback: 退回 $DATE 稽核修正" -m "$(git log --format='- %s' --grep="^audit: $DATE")"
+          git pull --rebase -q origin main && git push origin HEAD:main
+          echo "已退回 $DATE 的稽核修正"

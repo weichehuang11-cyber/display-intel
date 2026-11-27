@@ -166,7 +166,7 @@ BRAND_CANON = {b.lower(): b for b in [
 BRAND_ALIASES = {"机械革命": "Mechrevo", "機械革命": "Mechrevo", "lg electronics": "LG", "樂金": "LG",
                  "华硕": "ASUS", "華碩": "ASUS", "联想": "Lenovo", "聯想": "Lenovo", "惠普": "HP", "戴尔": "Dell", "戴爾": "Dell",
                  "宏碁": "Acer", "微星": "MSI", "苹果": "Apple", "蘋果": "Apple", "华为": "Huawei", "華為": "Huawei",
-                 "小米": "Xiaomi", "荣耀": "Honor", "榮耀": "Honor", "雷神": "Thunderobot", "机械师": "Machenike"}
+                 "小米": "Xiaomi", "荣耀": "Honor", "榮耀": "Honor", "雷神": "Thunderobot", "机械师": "Machenike", "外星人": "Alienware", "日本hp": "HP", "日本HP": "HP"}
 
 
 def normalize_identity(spec: PanelSpec) -> PanelSpec:
@@ -188,6 +188,9 @@ def normalize_identity(spec: PanelSpec) -> PanelSpec:
     for alias, canon in BRAND_ALIASES.items():  # 機型開頭重複中文品牌名，例如「机械革命 蛟龙16」
         if canon == brand and model.startswith(alias):
             model = model[len(alias):].strip()
+    if brand.lower() == "rog":  # ROG 是 ASUS 的子品牌（11/27 稽核）
+        brand = "ASUS"
+        model = model if model.lower().startswith("rog") else f"ROG {model}".strip()
     if brand.lower() in ("alienware", "dell alienware"):
         # Alienware 是 Dell 的子品牌：品牌統一為 Dell，機型寫成「Alienware 16X Aurora」
         brand = "Dell"

@@ -263,6 +263,8 @@ def enforce_evidence(spec: PanelSpec, text: str) -> tuple[PanelSpec, list[str]]:
 _TABLET_RE = re.compile(r"\btab\b|\btablet\b|\bipad\b|matepad|\bxiaoxin pad\b|平板", re.I)
 _MONITOR_RE = re.compile(r"monitor|ultrawide|顯示器|显示器|モニター|螢幕$", re.I)
 _AIO_RE = re.compile(r"\baio\b|all[\s-]?in[\s-]?one|一體機|一体机|imac|\bstudio\b", re.I)
+# 常見外接螢幕系列名稱：AI 有時把它們標成 AIO（11/27 稽核：Odyssey G80HF、Predator X27U、AW3426DW 被列進 AIO）
+_MONITOR_MODEL_RE = re.compile(r"\bodyssey\b|\bpredator x\d|\baw\d{4}|\bultragear\b|\bultrafine\b|\bultrawide\b|\bmonitor\b|\bproart display\b", re.I)
 MONITOR_ONLY_BRANDS = {"innocn", "ktc", "aoc", "benq", "viewsonic", "eizo", "koorui", "titan army", "泰坦军团", "huntkey", "jsaux"}
 _PORTABLE_RE = re.compile(r"portable[\s-]?monitor|/monitors?/|攜帶式螢幕|便携屏|便攜螢幕|モバイルモニター", re.I)
 
@@ -270,8 +272,11 @@ _PORTABLE_RE = re.compile(r"portable[\s-]?monitor|/monitors?/|攜帶式螢幕|�
 def non_laptop_reason(spec: PanelSpec, context: str = "") -> Optional[str]:
     """平板或外接螢幕回傳原因；筆電、AIO 回傳 None。context 可傳入文章標題。"""
     name = f"{spec.brand or ''} {spec.model or ''}"
-    if (spec.product_type or "").lower() == "aio" or _AIO_RE.search(name):
+    if _AIO_RE.search(name):
         return None
+    if (spec.product_type or "").lower() == "aio":
+        # 標成 AIO 但名稱是外接螢幕系列（且沒有 AIO／iMac 字樣）→ 外接螢幕
+        return "外接螢幕（被誤標成 AIO）" if _MONITOR_MODEL_RE.search(name) or _MONITOR_RE.search(name) else None
     if _TABLET_RE.search(name):
         return "平板電腦"
     if (spec.brand or "").strip().lower() in MONITOR_ONLY_BRANDS:
@@ -342,9 +347,9 @@ def surface_code(surface: Optional[str]) -> Optional[str]:
     t = _norm(surface)
     codes = []
     low_reflect = bool(re.search(r"\baglr\b|low[\s-]?reflect|低反射", t))
-    anti_glare = bool(re.search(r"\bag\b|anti[\s-]?glare|matte|non[\s-]?glare|霧面|雾面|防眩|抗眩", t))
-    anti_reflect = bool(re.search(r"\bar\b|anti[\s-]?reflect|抗反射|防反射|減反射|减反射", t))
-    glossy = bool(re.search(r"\bbv\b|bright[\s-]?view|gloss|亮面|鏡面|镜面|光面", t))
+    anti_glare = bool(re.search(r"\bag\b|anti[\s-]?glare|matte|non[\s-]?glare|霧面|雾面|防眩|抗眩|非光沢|ノングレア|アンチグレア", t))
+    anti_reflect = bool(re.search(r"\bar\b|anti[\s-]?reflect|抗反射|防反射|減反射|减反射|反射防止|反射低減", t))
+    glossy = bool(re.search(r"\bbv\b|bright[\s-]?view|gloss|亮面|鏡面|镜面|光面|光沢|グレア|^glare$", t))
     if low_reflect and (anti_glare or "aglr" in t):
         codes.append("AGLR")
     elif anti_glare:

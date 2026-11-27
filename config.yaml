@@ -298,6 +298,7 @@ corrections:
 # 排除來源：這些網頁帶進來的機型不列入報告（網址包含這段文字即可）
 exclude_sources:
   - pcmag.com/deals/walmart-cyber-monday-laptop-deals   # 多年前的 Cyber Monday 特價文（Katana GF66 等舊機型）
+  - laptopmedia.com/review/lenovo-legion-7-15-review-tackling-the-new-super-graphics-cards   # 11/27 稽核：2020 年 6 月的評測（RTX 2080 Super），被當成 2026 新機；文中是 144Hz，側欄數字被讀成 240Hz
 # 範例（照這個格式加在 corrections: 底下）：
 # corrections:
 #   - brand: HP
