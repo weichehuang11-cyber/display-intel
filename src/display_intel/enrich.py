@@ -18,6 +18,7 @@ from datetime import timedelta
 from typing import Callable
 from urllib.parse import urlsplit
 
+import re
 import httpx
 
 from . import derive, verify
@@ -125,7 +126,8 @@ def _tavily(client: httpx.Client, budget: TavilyBudget, query: str, max_results:
     budget.spend()
     r = client.post("https://api.tavily.com/search", headers={"Authorization": f"Bearer {env('TAVILY_API_KEY')}"}, json=body)
     r.raise_for_status()
-    return [i for i in r.json().get("results", []) if not old_page(i.get("url", ""))]
+    return [i for i in r.json().get("results", [])
+            if not old_page(i.get("url", "")) and not old_text(i.get("raw_content") or i.get("content") or "")]
 
 
 def old_page(url: str, today=None) -> bool:
@@ -135,6 +137,28 @@ def old_page(url: str, today=None) -> bool:
     m = re.search(r"/(20\d\d)/", url or "")
     year = (today or datetime.now(timezone.utc)).year
     return bool(m and int(m.group(1)) < year - 1)
+
+
+_MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+_HEAD_DATE = re.compile(rf"(?:{_MONTHS}\s+\d{{1,2}},?\s+(20\d\d))|(?:\d{{1,2}}\s+{_MONTHS}\s+(20\d\d))|\b(20\d\d)[-/.年](?:0?[1-9]|1[0-2])[-/.月]", re.I)
+_OLD_GPU = re.compile(r"\b(?:rtx|geforce rtx)\s?(?:20|30)[5-9]0\b|\bgtx\s?1[06][5-8]0\b|\bradeon rx\s?[56][5-9]00m\b", re.I)
+_NEW_GPU = re.compile(r"\brtx\s?[45]0[5-9]0\b|\brtx\s?pro\b|\bradeon (?:rx\s?)?[789]\d{2}0m?\b|\b8\d0m\b|\barc\s?[ab]\d{3}", re.I)
+
+
+def old_text(text: str, today=None) -> bool:
+    """頁面內容是舊世代機型（11/27 稽核：2020 年的 Legion 7 評測被當成新機）。
+    只看正文開頭 1,500 字（標題、發布日期、第一段），不看側欄與相關文章：
+    1. 開頭寫的日期全部早於前年 → 舊頁面
+    2. 開頭只提到 RTX 20／30、GTX 16 這類舊顯示卡、沒有任何新世代顯示卡 → 舊頁面"""
+    from datetime import datetime, timezone
+    head = (text or "")[:1500]
+    if not head:
+        return False
+    year = (today or datetime.now(timezone.utc)).year
+    years = [int(next(g for g in m.groups() if g)) for m in _HEAD_DATE.finditer(head)]
+    if years and max(years) < year - 1:
+        return True
+    return bool(_OLD_GPU.search(head) and not _NEW_GPU.search(head))
 
 
 def search_specs(client: httpx.Client, rec: PanelRecord, budget: TavilyBudget) -> list[RawArticle]:

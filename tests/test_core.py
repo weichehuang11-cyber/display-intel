@@ -1482,3 +1482,20 @@ def test_rog_and_japan_hp_brand():
     from display_intel.schema import PanelSpec
     assert (lambda s: (s.brand, s.model))(normalize_identity(PanelSpec(brand="ROG", model="Zephyrus G14"))) == ("ASUS", "ROG Zephyrus G14")
     assert normalize_identity(PanelSpec(brand="日本HP", model="OmniBook 5")).brand == "HP"
+
+
+def test_old_text_detects_old_generation_pages():
+    from datetime import datetime, timezone
+    from display_intel.enrich import old_text
+    now = datetime(2026, 11, 28, tzinfo=timezone.utc)
+    legion2020 = ("Lenovo Legion 7 (15) review – tackling the new Super graphics cards. Published June 5, 2020. "
+                  "With an RTX 2080 Super and a 15.6-inch 144Hz IPS panel...")
+    assert old_text(legion2020, now)
+    assert old_text("ROG Strix G15 review: RTX 3060 and Ryzen 7 5800H, 300Hz panel", now)
+    assert not old_text("Legion 7i Gen 11 review (November 3, 2026): RTX 5080, 16-inch OLED 240Hz", now)
+    assert not old_text("ThinkPad T14 Gen 7 review. 2026-10-12. Intel Core Ultra, 2.8K OLED", now)
+    # 只有新卡、或新舊都提到（例如比較文）不算舊
+    assert not old_text("RTX 5070 vs RTX 3070: how far have laptop GPUs come?", now)
+    # 側欄在 1,500 字以後提到舊年份：不影響
+    assert not old_text("Zenbook 14 2026 review, Intel Panther Lake, 3K OLED. " + "x" * 1600 + " Related: 2019 review", now)
+    assert not old_text("", now)
